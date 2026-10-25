@@ -13,3 +13,6 @@ Desktop.ini
 
 # Personal Claude Code settings (the shared .claude/settings.json is kept)
 .claude/settings.local.json
+
+# Private project notes for Claude Code (kept locally, not published)
+CLAUDE.md
