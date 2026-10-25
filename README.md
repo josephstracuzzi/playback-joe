@@ -1,4 +1,4 @@
-# Playback Joe v10.18.2
+# Playback Joe v10.20.2
 Designed by Joseph Stracuzzi
 
 **Cue-based video, audio and image playback for live shows.** Line up your media in a cuelist, preview the next cue, and TAKE it to a clean fullscreen output on your projector or second screen, while you keep full control from the operator console.
@@ -12,8 +12,8 @@ Get the latest version from the **[Releases page](https://github.com/josephstrac
 
 | System | Download | How to run |
 |---|---|---|
-| Windows 10 / 11 (64-bit) | `Playback Joe 10.18.2 Portable.exe` | Double-click it. |
-| Linux (x64) | `playback-joe-10.18.2.tar.gz` | Unpack it, run `chmod +x playback-joe` once, then start `./playback-joe`. |
+| Windows 10 / 11 (64-bit) | `Playback Joe 10.20.2 Portable.exe` | Double-click it. |
+| Linux (x64) | `playback-joe-10.20.2.tar.gz` | Unpack it, run `chmod +x playback-joe` once, then start `./playback-joe`. |
 
 The apps are not code-signed, so on first launch Windows SmartScreen says "Windows protected your PC". Click **More info → Run anyway**.
 

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>PLAYBACK JOE 10.18.2 - OUTPUT</title>
+    <title>PLAYBACK JOE 10.20.2 - OUTPUT</title>
     <style>
         * {
             box-sizing: border-box;
@@ -189,6 +189,28 @@
             rampActiveGain(0, timeLeft);
         }
 
+        // A LOOP cue wrapped back to the start after its fade-out began: fade picture and sound back
+        // in over what is left of the cue's FADE IN (from wherever the fade-out had got to), or put
+        // them straight back to full if it has no fade-in.
+        function undoFadeOutOnLoop(el) {
+            fadeOutStarted = false;
+            const fadeLeft = currentFadeIn - el.currentTime;
+            if (fadeLeft > 0.05) {
+                if (currentClip?.type === 'audio') {
+                    fadeOverlay.style.transition = 'none';
+                    fadeOverlay.style.opacity = '0';
+                } else {
+                    fadeOverlay.style.transition = `opacity ${fadeLeft}s ease`;
+                    fadeOverlay.style.opacity = '0';
+                }
+                rampActiveGain(clipGainValue(), fadeLeft);
+            } else {
+                fadeOverlay.style.transition = 'none';
+                fadeOverlay.style.opacity = '0';
+                rampActiveGain(clipGainValue(), 0);
+            }
+        }
+
         api?.onPlayVideo((clip) => {
             // A TAKE during a KILL fade cancels the pending KILL cleanup, so it can't blank the new clip
             if (killCleanupTimer) { clearTimeout(killCleanupTimer); killCleanupTimer = null; }
@@ -310,14 +332,10 @@
             // Send timeupdate back to operator console
             api?.sendTimeUpdate(cur, currentDuration);
 
-            // Handle loop wrap-around or backwards seek: reset fade. (Only a real jump back counts, so a
-            // clip shorter than its fade-out can't flip the fade on and off near the start.)
-            if (fadeOutStarted && cur < lastReportedTime - 0.5) {
-                fadeOutStarted = false;
-                fadeOverlay.style.transition = 'none';
-                fadeOverlay.style.opacity = '0';
-                rampActiveGain(clipGainValue(), 0);
-            }
+            // Handle loop wrap-around: undo the fade-out, fading back in if the cue has a fade-in. (Only a
+            // real jump back counts, so a clip shorter than its fade-out can't flip the fade on and off
+            // near the start. Operator seeks reset the fade in onProgramCommand instead.)
+            if (fadeOutStarted && cur < lastReportedTime - 0.5) undoFadeOutOnLoop(vid);
             lastReportedTime = cur;
 
             // Trigger linear fade-out overlay (picture and sound together)
@@ -325,7 +343,8 @@
                 const timeLeft = currentDuration - cur;
                 if (timeLeft <= currentFadeOut && !fadeOutStarted) {
                     fadeOutStarted = true;
-                    fadeOverlay.style.transition = `opacity ${currentFadeOut}s linear`;
+                    // Over the time actually left (like the sound), so the picture is fully black at the end
+                    fadeOverlay.style.transition = `opacity ${Math.max(0.05, timeLeft)}s linear`;
                     fadeOverlay.style.opacity = '1';
                     startAudioFadeOut(vid);
                 }
@@ -337,19 +356,14 @@
             const cur = aud.currentTime;
             api?.sendTimeUpdate(cur, currentDuration);
 
-            if (fadeOutStarted && cur < lastReportedTime - 0.5) {
-                fadeOutStarted = false;
-                fadeOverlay.style.transition = 'none';
-                fadeOverlay.style.opacity = '0';
-                rampActiveGain(clipGainValue(), 0);
-            }
+            if (fadeOutStarted && cur < lastReportedTime - 0.5) undoFadeOutOnLoop(aud);
             lastReportedTime = cur;
 
             if (currentFadeOut > 0 && currentDuration > 0) {
                 const timeLeft = currentDuration - cur;
                 if (timeLeft <= currentFadeOut && !fadeOutStarted) {
                     fadeOutStarted = true;
-                    fadeOverlay.style.transition = `opacity ${currentFadeOut}s linear`;
+                    fadeOverlay.style.transition = `opacity ${Math.max(0.05, timeLeft)}s linear`;
                     fadeOverlay.style.opacity = '1';
                     startAudioFadeOut(aud);
                 }

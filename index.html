@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>PLAYBACK JOE 10.18.2 - OPERATOR</title>
+    <title>PLAYBACK JOE 10.20.2 - OPERATOR</title>
     <style>
         * { box-sizing: border-box; }
         /* Installed system monospace fonts only (no network fetch on show machines): Consolas on Windows, DejaVu/Liberation on Linux */
@@ -241,7 +241,13 @@
         .btn-goto { background: var(--blue) !important; color: #fff !important; border-color: var(--blue) !important; }
         .btn-goto:hover { background: var(--blue-hover) !important; border-color: var(--blue-hover) !important; color: #fff !important; }
         
-        .scrub-slider { width: 100%; margin-top: 6px; accent-color: #28a745; cursor: pointer; height: 6px; background: #222; border-radius: 3px; }
+        .scrub-slider { width: 100%; margin-top: 6px; accent-color: #28a745; cursor: pointer; height: 6px; background: #222; border-radius: 3px; outline: none; }
+        /* Frame step buttons either side of the scrub bar */
+        .scrub-row { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+        .scrub-row .scrub-slider { flex: 1; min-width: 0; margin-top: 0; }
+        .btn-frame { background: #222; color: #ddd; border: 1px solid #444; border-radius: 3px; width: 36px; height: 24px; padding: 0; flex-shrink: 0; outline: none; display: flex; align-items: center; justify-content: center; }
+        .btn-frame:hover { background: #333; color: #fff; }
+        .btn-frame svg { width: 14px; height: 14px; fill: currentColor; display: block; }
 
         .header-title-container { display: flex; align-items: center; gap: 8px; }
         /* logo.png has ~10px of transparent space above the artwork at 50px tall; pull it up so the
@@ -287,7 +293,7 @@
            The faint centre line marks the 100% detent. */
         .inline-volume {
             --vol-fill: #888; --vol-thumb: #888; --vol-pct: 50%;
-            -webkit-appearance: none; appearance: none; width: 70px; height: 18px; margin: 0; cursor: pointer;
+            -webkit-appearance: none; appearance: none; width: 70px; height: 18px; margin: 0; cursor: pointer; outline: none;
             background: linear-gradient(to right, transparent calc(50% - 1px), #555 calc(50% - 1px), #555 calc(50% + 1px), transparent calc(50% + 1px)) no-repeat center / 100% 10px;
         }
         .inline-volume::-webkit-slider-runnable-track {
@@ -329,6 +335,7 @@
         .fade-group input[type="range"] {
             --fade-fill: var(--blue); --fade-thumb: #888; --fade-pct: 0%;
             -webkit-appearance: none; appearance: none; width: 65px; height: 18px; margin: 0; background: transparent; cursor: pointer;
+            outline: none; /* no focus ring when Shift (or any key) is pressed mid-drag */
         }
         .fade-group input[type="range"]::-webkit-slider-runnable-track {
             height: 4px; border-radius: 2px;
@@ -384,7 +391,7 @@
     <div id="credits-modal-overlay" onclick="hideCredits()">
         <div class="focus-modal" style="border-color: var(--blue); color: #fff; cursor: default; width: 440px;" onclick="event.stopPropagation()">
             <img src="logo.png" alt="Playback Joe Logo" style="height: 44px; width: auto; object-fit: contain; margin-bottom: 12px;">
-            <div style="font-size: 13px; margin-bottom: 10px; color: var(--blue); font-weight: bold; letter-spacing: 1px;">ABOUT PLAYBACK JOE v10.18.2</div>
+            <div style="font-size: 13px; margin-bottom: 10px; color: var(--blue); font-weight: bold; letter-spacing: 1px;">ABOUT PLAYBACK JOE v10.20.2</div>
             <div style="font-size: 14px; font-weight: normal; line-height: 1.6; color: #ddd;">
                 Designed by <strong style="color: #fff;">Joseph Stracuzzi</strong><br>
                 Coded with <strong style="color: #fff;">Gemini</strong> &amp; <strong style="color: #fff;">Claude</strong><br>
@@ -424,7 +431,7 @@
                     <button onclick="clearConsoleLogs()" style="background: #2a2a2a; color: #ccc; border: 1px solid #444; padding: 6px 12px; font-size: 10px; border-radius: 3px; cursor: pointer;">CLEAR LOGS</button>
                     <button onclick="copyConsoleLogs()" style="background: #2a2a2a; color: #ccc; border: 1px solid #444; padding: 6px 12px; font-size: 10px; border-radius: 3px; cursor: pointer;">COPY LOGS</button>
                 </div>
-                <span style="font-size: 10px; color: #666;">PLAYBACK JOE v10.18.2</span>
+                <span style="font-size: 10px; color: #666;">PLAYBACK JOE v10.20.2</span>
             </div>
         </div>
     </div>
@@ -437,7 +444,7 @@
         <div class="playlist-header">
             <div class="header-title-container">
                 <img src="logo.png" alt="Playback Joe" class="header-logo" onclick="showCredits()" title="Click for About / Credits">
-                <span class="version-badge" onclick="showCredits()" title="Click for About / Credits">v10.18.2</span>
+                <span class="version-badge" onclick="showCredits()" title="Click for About / Credits">v10.20.2</span>
             </div>
             <div class="header-right">
                 <div class="header-actions">
@@ -544,8 +551,12 @@
                 </div>
             </div>
 
-            <input type="range" id="prog-scrub" class="scrub-slider" min="0" max="100" value="0" step="0.1" oninput="scrubProgram(this.value)">
-            
+            <div class="scrub-row">
+                <button class="btn-frame" onclick="stepProgramFrame(-1); this.blur();" title="BACK ONE FRAME (PAUSES PROGRAM)" aria-label="BACK ONE FRAME"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="3.5" height="16" rx="1"></rect><path d="M21 4.8v14.4a1 1 0 0 1-1.5.86L8.6 12.86a1 1 0 0 1 0-1.72L19.5 3.94A1 1 0 0 1 21 4.8z"></path></svg></button>
+                <input type="range" id="prog-scrub" class="scrub-slider" min="0" max="100" value="0" step="0.1" oninput="scrubProgram(this.value)">
+                <button class="btn-frame" onclick="stepProgramFrame(1); this.blur();" title="FORWARD ONE FRAME (PAUSES PROGRAM)" aria-label="FORWARD ONE FRAME"><svg viewBox="0 0 24 24"><path d="M3 4.8v14.4a1 1 0 0 0 1.5.86l10.9-7.2a1 1 0 0 0 0-1.72L4.5 3.94A1 1 0 0 0 3 4.8z"></path><rect x="17.5" y="4" width="3.5" height="16" rx="1"></rect></svg></button>
+            </div>
+
             <div class="transport-bar">
                 <button onclick="sendProgramCommand('play')">▶ PLAY</button>
                 <button onclick="sendProgramCommand('pause')">❚❚ PAUSE</button>
@@ -1145,7 +1156,7 @@
                 let fadeControlsHtml = `
                     <div class="fade-group">
                         <span>IN:</span>
-                        <input type="range" class="${clip.fadeIn > 0 ? 'fade-active' : ''}" style="--fade-pct: ${clip.fadeIn / 5 * 100}%" min="0" max="5" step="0.5" value="${clip.fadeIn}" ${isLive ? 'disabled' : ''} oninput="setClipFade(${idx}, 'fadeIn', this.value, this)" onchange="this.blur()" onmouseup="this.blur()">
+                        <input type="range" class="${clip.fadeIn > 0 ? 'fade-active' : ''}" style="--fade-pct: ${clip.fadeIn / 5 * 100}%" min="0" max="5" step="0.5" value="${clip.fadeIn}" ${isLive ? 'disabled' : ''} oninput="setClipFade(${idx}, 'fadeIn', this.value, this)" onchange="this.blur()" onmouseup="this.blur()" ondblclick="resetClipFade(${idx}, 'fadeIn', this)" title="DOUBLE-CLICK: 0.0S">
                         <span id="fadein-val-${idx}">${clip.fadeIn.toFixed(1)}S</span>
                     </div>
                 `;
@@ -1154,7 +1165,7 @@
                     fadeControlsHtml += `
                         <div class="fade-group">
                             <span>OUT:</span>
-                            <input type="range" class="${clip.fadeOut > 0 ? 'fade-active' : ''}" style="--fade-pct: ${clip.fadeOut / 5 * 100}%" min="0" max="5" step="0.5" value="${clip.fadeOut}" ${isLive ? 'disabled' : ''} oninput="setClipFade(${idx}, 'fadeOut', this.value, this)" onchange="this.blur()" onmouseup="this.blur()">
+                            <input type="range" class="${clip.fadeOut > 0 ? 'fade-active' : ''}" style="--fade-pct: ${clip.fadeOut / 5 * 100}%" min="0" max="5" step="0.5" value="${clip.fadeOut}" ${isLive ? 'disabled' : ''} oninput="setClipFade(${idx}, 'fadeOut', this.value, this)" onchange="this.blur()" onmouseup="this.blur()" ondblclick="resetClipFade(${idx}, 'fadeOut', this)" title="DOUBLE-CLICK: 0.0S">
                             <span id="fadeout-val-${idx}">${clip.fadeOut.toFixed(1)}S</span>
                         </div>
                     `;
@@ -1199,7 +1210,7 @@
                                 <div class="clip-controls">
                                     <div class="control-group">
                                         ${volumeSvg}
-                                        <input type="range" id="vol-input-${idx}" class="inline-volume ${volumeStateClass(clip.gain)}" min="0" max="200" step="1" value="${gainToFaderPos(clip.gain)}" style="--vol-pct: ${gainToFaderPos(clip.gain) / 2}%" ${isLive ? 'disabled' : ''} oninput="setClipGain(${idx}, this.value)" onchange="this.blur()" onmouseup="this.blur()" title="VOLUME: ${Math.round(clip.gain * 100)}%">
+                                        <input type="range" id="vol-input-${idx}" class="inline-volume ${volumeStateClass(clip.gain)}" min="0" max="200" step="1" value="${gainToFaderPos(clip.gain)}" style="--vol-pct: ${gainToFaderPos(clip.gain) / 2}%" ${isLive ? 'disabled' : ''} oninput="setClipGain(${idx}, this.value)" onchange="this.blur()" onmouseup="this.blur()" ondblclick="resetClipGain(${idx})" title="VOLUME: ${Math.round(clip.gain * 100)}% (DOUBLE-CLICK: 100%)">
                                     </div>
                                 </div>
                                 <div class="cue-actions">
@@ -1282,9 +1293,24 @@
                 inputEl.classList.remove('boosted', 'unity');
                 const stateClass = volumeStateClass(playlist[idx].gain);
                 if (stateClass) inputEl.classList.add(stateClass);
-                inputEl.title = `VOLUME: ${Math.round(playlist[idx].gain * 100)}%`;
+                inputEl.title = `VOLUME: ${Math.round(playlist[idx].gain * 100)}% (DOUBLE-CLICK: 100%)`;
             }
             saveStateToLocalStorage();
+        }
+
+        // Double-click a fader to reset it: volume back to 100%, fade times back to 0.0S.
+        // (Disabled faders on the live cue get no dblclick, and the setters also refuse the live cue.)
+        function resetClipGain(idx) {
+            const inputEl = document.getElementById(`vol-input-${idx}`);
+            if (inputEl) inputEl.value = 100;
+            setClipGain(idx, 100);
+            if (inputEl) inputEl.blur();
+        }
+
+        function resetClipFade(idx, type, inputEl) {
+            inputEl.value = 0;
+            setClipFade(idx, type, 0, inputEl);
+            inputEl.blur();
         }
 
         function setClipFade(idx, type, fadeVal, inputEl) {
@@ -1524,6 +1550,69 @@
         function jumpToEnd(seconds) {
             if (currentIndex === -1) return;
             sendProgramCommand('goto-end', seconds);
+        }
+
+        // ---- Frame step (◀| |▶ beside the scrub bar) ----
+        // Clips don't carry a frame rate, so the PGM monitor measures it while a video cue plays:
+        // the smallest gap between presented frames (requestVideoFrameCallback) is one frame.
+        // Until a clip has been measured, or for audio cues, a step is 1/30 s.
+        const DEFAULT_FRAME_DUR = 1 / 30;
+        const STANDARD_FPS = [23.976, 24, 25, 29.97, 30, 48, 50, 59.94, 60];
+        const frameDurByUrl = new Map();
+
+        // Container timestamps are often whole milliseconds (WebM: 33 ms for 30 fps), so snap the
+        // measured gap to the nearest standard rate when it is within 2%
+        function snapFrameDur(gap) {
+            const fps = 1 / gap;
+            const nearest = STANDARD_FPS.reduce((a, b) => Math.abs(b - fps) < Math.abs(a - fps) ? b : a);
+            return Math.abs(nearest - fps) / nearest <= 0.02 ? (nearest === 29.97 ? 1001 / 30000 : nearest === 59.94 ? 1001 / 60000 : nearest === 23.976 ? 1001 / 24000 : 1 / nearest) : gap;
+        }
+        let frameMeasureToken = 0;
+        let programReportedTime = 0;   // latest position from the output (or local PGM), see handleTimeUpdate
+        let frameStepTarget = null;    // where the last step went, until the output reports it
+        let frameStepAt = 0;
+
+        function measureProgramFrameRate(clip) {
+            const token = ++frameMeasureToken;
+            const progVid = document.getElementById('program-video');
+            if (clip.type !== 'video' || !progVid.requestVideoFrameCallback) return;
+            let lastMediaTime = null;
+            let minGap = Infinity;
+            const onFrame = (now, meta) => {
+                if (token !== frameMeasureToken) return;
+                if (lastMediaTime !== null) {
+                    const gap = Math.abs(meta.mediaTime - lastMediaTime);
+                    if (gap > 0.008 && gap < 0.1 && gap < minGap - 0.0002) {
+                        minGap = gap;
+                        frameDurByUrl.set(clip.url, snapFrameDur(gap));
+                    }
+                }
+                lastMediaTime = meta.mediaTime;
+                progVid.requestVideoFrameCallback(onFrame);
+            };
+            progVid.requestVideoFrameCallback(onFrame);
+        }
+
+        function stepProgramFrame(dir) {
+            if (currentIndex === -1 || isKilling) return;
+            const clip = playlist[currentIndex];
+            if (!clip || clip.type === 'image' || currentProgramDuration <= 0) return;
+            const el = clip.type === 'audio' ? document.getElementById('program-audio') : document.getElementById('program-video');
+            // Always PAUSE (harmless if already paused): with the output open the operator's local copy
+            // of an audio cue never plays, so its paused flag says nothing about the real program.
+            sendProgramCommand('pause');
+
+            const fd = frameDurByUrl.get(clip.url) || DEFAULT_FRAME_DUR;
+            // Rapid clicks build on the last step until the output has reported where it landed
+            const base = (frameStepTarget !== null && Date.now() - frameStepAt < 500) ? frameStepTarget
+                : (isOutputWindowOpen ? programReportedTime : el.currentTime);
+            const lastFrame = Math.max(0, Math.ceil(currentProgramDuration / fd) - 1);
+            const frame = Math.min(lastFrame, Math.max(0, Math.floor(base / fd + 0.001) + dir));
+            // Aim for the middle of the frame so rounding can't land on its neighbour
+            const target = Math.min(currentProgramDuration - 0.001, (frame + 0.5) * fd);
+            frameStepTarget = target;
+            frameStepAt = Date.now();
+            sendProgramCommand('seek', target);
         }
 
         // PGM audio indicator: an audio cue has no picture, so show an icon + name while it is on PGM
@@ -1766,6 +1855,9 @@
                 progVid.loop = (clip.endBehavior === 'loop');
                 progVid.play().catch(() => {});
             }
+            frameStepTarget = null;
+            programReportedTime = 0;
+            measureProgramFrameRate(clip);
 
             // Visual Fade-in
             const fadeIn = clip.fadeIn || 0;
@@ -1864,6 +1956,7 @@
         });
 
         function handleTimeUpdate(cur, dur) {
+            programReportedTime = cur;
             if (currentIndex === -1 || isKilling) return;
             const clip = playlist[currentIndex];
             if (!clip || clip.type === 'image') return;
@@ -1890,13 +1983,21 @@
             }
 
             // Fade-out handling, matching output.html: picture and (output closed) sound fade over the
-            // time left. A loop wrap or backwards seek undoes a fade-out that has started.
+            // time left. A loop wrap undoes a fade-out that has started, fading back in over what is left
+            // of the cue's FADE IN (straight back to full if it has none).
             const progFade = document.getElementById('program-fade-overlay');
             if (programFadeOutStarted && cur < lastProgramTime - 0.5 && progFade) {
                 programFadeOutStarted = false;
-                progFade.style.transition = 'none';
-                progFade.style.opacity = '0';
-                if (!isOutputWindowOpen) rampLocalAudio(1, 0);
+                const fadeLeft = (clip.fadeIn || 0) - cur;
+                if (fadeLeft > 0.05) {
+                    progFade.style.transition = `opacity ${fadeLeft}s ease`;
+                    progFade.style.opacity = '0';
+                    if (!isOutputWindowOpen) rampLocalAudio(1, fadeLeft);
+                } else {
+                    progFade.style.transition = 'none';
+                    progFade.style.opacity = '0';
+                    if (!isOutputWindowOpen) rampLocalAudio(1, 0);
+                }
             }
             if (clip.fadeOut > 0 && currentProgramDuration > 0) {
                 const timeLeft = currentProgramDuration - cur;
@@ -1979,8 +2080,23 @@
         });
 
         window.addEventListener('keydown', (e) => {
-            if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-            
+            const t = e.target;
+            const isSlider = t.tagName === 'INPUT' && t.type === 'range';
+            // Text entry keeps its keys; a focused slider must not block TAKE / KILL / cue navigation
+            if ((t.tagName === 'INPUT' && !isSlider) || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return;
+            if (isSlider) {
+                if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
+                    // On the PGM scrub bar ← → step one frame (same as the ◀| |▶ buttons);
+                    // on the cue faders they keep their normal slider behaviour
+                    if (t.id === 'prog-scrub') {
+                        e.preventDefault();
+                        stepProgramFrame(e.code === 'ArrowLeft' ? -1 : 1);
+                    }
+                    return;
+                }
+                if (['Home', 'End', 'PageUp', 'PageDown'].includes(e.code)) return;
+            }
+
             if (e.code === 'ArrowDown') {
                 e.preventDefault();
                 if (playlist.length > 0) {

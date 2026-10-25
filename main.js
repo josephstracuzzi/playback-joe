@@ -1,5 +1,5 @@
 // ============================================================================
-// Playback Joe v10.18.2 - Main Process (Production & Secure)
+// Playback Joe v10.20.2 - Main Process (Production & Secure)
 // Fixed: Context Isolation enabled, Preload Bridge, RFC file URLs, Safe IPC
 // ============================================================================
 

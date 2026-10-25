@@ -1,6 +1,6 @@
 {
   "name": "playback-joe",
-  "version": "10.18.2",
+  "version": "10.20.2",
   "description": "Professional cue-based media playback application for Windows, macOS and Linux with dual display support",
   "main": "main.js",
   "scripts": {
