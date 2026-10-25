@@ -1,0 +1,69 @@
+{
+  "name": "playback-joe",
+  "version": "10.18.2",
+  "description": "Professional cue-based media playback application for Windows, macOS and Linux with dual display support",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win --x64",
+    "build:mac": "electron-builder --mac",
+    "build:linux": "electron-builder --linux --x64"
+  },
+  "author": "Joseph Stracuzzi",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {
+    "electron": "^28.3.3",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.playbackjoe.app",
+    "productName": "Playback Joe",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        "portable"
+      ],
+      "icon": "logo.ico"
+    },
+    "portable": {
+      "artifactName": "${productName} ${version} Portable.exe"
+    },
+    "mac": {
+      "target": [
+        { "target": "zip", "arch": ["x64", "arm64"] }
+      ],
+      "icon": "icon.png",
+      "category": "public.app-category.video"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "tar.gz"
+      ],
+      "icon": "icon.png",
+      "category": "AudioVideo"
+    },
+    "extraResources": [
+      {
+        "from": "test_clips",
+        "to": "test_clips"
+      }
+    ],
+    "files": [
+      "main.js",
+      "preload.js",
+      "index.html",
+      "output.html",
+      "logo.png",
+      "logo.ico",
+      "icon.png"
+    ]
+  },
+  "allowScripts": {
+    "electron@28.3.3": true
+  }
+}

@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>PLAYBACK JOE 10.18.2 - OUTPUT</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body { 
+            background: #000; 
+            margin: 0; 
+            width: 100vw; 
+            height: 100vh; 
+            overflow: hidden; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            position: relative; 
+            user-select: none;
+            /* Allows easily dragging and moving the borderless window when not fullscreen */
+            -webkit-app-region: drag;
+        }
+        video, img { 
+            width: 100%; 
+            height: 100%; 
+            object-fit: contain; 
+            display: none; 
+            pointer-events: none;
+            -webkit-app-region: drag;
+        }
+        #output-fade-overlay { 
+            position: absolute; 
+            top: 0; 
+            left: 0; 
+            width: 100%; 
+            height: 100%; 
+            background: #000; 
+            opacity: 0; 
+            pointer-events: none; 
+            transition: none; 
+            z-index: 999; 
+            will-change: opacity;
+            transform: translateZ(0);
+        }
+    </style>
+</head>
+<body>
+    <div id="output-fade-overlay"></div>
+    <video id="output-video"></video>
+    <img id="output-image" />
+    <audio id="output-audio"></audio>
+
+    <script>
+        // Supports both contextBridge (window.playbackAPI) and legacy fallback
+        const api = window.playbackAPI || (typeof require !== 'undefined' ? {
+            sendTimeUpdate: (c, d) => require('electron').ipcRenderer.send('program-timeupdate', c, d),
+            sendAudioLevel: (l) => require('electron').ipcRenderer.send('audio-level-update', l),
+            autoAdvance: () => require('electron').ipcRenderer.send('auto-advance'),
+            onPlayVideo: (cb) => require('electron').ipcRenderer.on('play-video', (e, clip) => cb(clip)),
+            onProgramCommand: (cb) => require('electron').ipcRenderer.on('program-command', (e, cmd, val) => cb(cmd, val)),
+            onTriggerKill: (cb) => require('electron').ipcRenderer.on('trigger-kill', () => cb()),
+            logError: (msg) => require('electron').ipcRenderer.send('log-error', msg),
+            reportMediaError: (info) => require('electron').ipcRenderer.send('output-media-error', info)
+        } : null);
+
+        const vid = document.getElementById('output-video');
+        const img = document.getElementById('output-image');
+        const aud = document.getElementById('output-audio');
+        const fadeOverlay = document.getElementById('output-fade-overlay');
+
+        let currentClip = null;
+        let currentFadeOut = 0;
+        let fadeOutStarted = false;
+        let currentDuration = 0;
+        let lastReportedTime = 0;
+        let currentEndBehavior = 'hold';
+        let killCleanupTimer = null;
+
+        // Heartbeat: tells main.js this page is alive. If it stops (page frozen), main restarts the output.
+        setInterval(() => api?.heartbeat?.(), 1000);
+
+        // Web Audio API Context for true volume boost up to 300% & Real-time VU meter analyzer
+        let audioCtx = null;
+        let vidGainNode = null;
+        let audGainNode = null;
+        let analyser = null;
+        let animFrameId = null;
+        let dataArray = null;
+
+        function initAudio() {
+            if (!audioCtx) {
+                try {
+                    const AudioCtxClass = window.AudioContext || window.webkitAudioContext;
+                    audioCtx = new AudioCtxClass();
+
+                    vidGainNode = audioCtx.createGain();
+                    audGainNode = audioCtx.createGain();
+
+                    analyser = audioCtx.createAnalyser();
+                    analyser.fftSize = 64;
+                    dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+                    const vidSrc = audioCtx.createMediaElementSource(vid);
+                    vidSrc.connect(vidGainNode).connect(analyser);
+
+                    const audSrc = audioCtx.createMediaElementSource(aud);
+                    audSrc.connect(audGainNode).connect(analyser);
+
+                    analyser.connect(audioCtx.destination);
+
+                    function broadcastAudioLevel() {
+                        if (analyser && dataArray && currentClip && (!vid.paused || !aud.paused)) {
+                            analyser.getByteFrequencyData(dataArray);
+                            let sum = 0;
+                            for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+                            const avg = sum / dataArray.length;
+                            const gainVal = currentClip.gain !== undefined ? currentClip.gain : 1.0;
+                            const normalized = (avg / 255) * gainVal * 2.0;
+                            api?.sendAudioLevel(normalized);
+                        } else {
+                            api?.sendAudioLevel(0);
+                        }
+                        animFrameId = requestAnimationFrame(broadcastAudioLevel);
+                    }
+                    animFrameId = requestAnimationFrame(broadcastAudioLevel);
+                } catch (e) {
+                    console.warn("WebAudio init notice:", e);
+                }
+            }
+            if (audioCtx && audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        function setGain(gainVal, isAudio = false) {
+            initAudio();
+            const val = Math.max(0, gainVal !== undefined ? gainVal : 1.0);
+            const targetNode = isAudio ? audGainNode : vidGainNode;
+            
+            if (targetNode && audioCtx) {
+                // Cancel any KILL fade-out ramp still scheduled, or it would keep pulling the new clip down
+                targetNode.gain.cancelScheduledValues(audioCtx.currentTime);
+                targetNode.gain.setValueAtTime(val, audioCtx.currentTime);
+            } else {
+                // Fallback to media element volume (clamped)
+                if (isAudio) aud.volume = Math.min(1.0, val);
+                else vid.volume = Math.min(1.0, val);
+            }
+        }
+
+        // ---- Cue audio fades (fade IN / fade OUT sliders) ----
+        // The clip's own gain node is ramped alongside the black overlay: up from silence on fade-in,
+        // down to silence over the time left on fade-out. Ramps run on the audio clock, so PAUSE freezes
+        // them and PLAY picks them up again; a seek, goto-end or loop wrap puts the level back.
+        let currentFadeIn = 0;
+
+        function activeGainNode() {
+            return currentClip?.type === 'audio' ? audGainNode : vidGainNode;
+        }
+
+        function clipGainValue() {
+            return Math.max(0, currentClip && currentClip.gain !== undefined ? currentClip.gain : 1.0);
+        }
+
+        function rampActiveGain(target, seconds) {
+            const node = activeGainNode();
+            if (!node || !audioCtx) return;
+            const now = audioCtx.currentTime;
+            node.gain.cancelScheduledValues(now);
+            if (seconds > 0) {
+                node.gain.setValueAtTime(node.gain.value, now);
+                node.gain.linearRampToValueAtTime(target, now + seconds);
+            } else {
+                node.gain.setValueAtTime(target, now);
+            }
+        }
+
+        function freezeActiveGain() {
+            const node = activeGainNode();
+            if (!node || !audioCtx) return;
+            const now = audioCtx.currentTime;
+            node.gain.cancelScheduledValues(now);
+            node.gain.setValueAtTime(node.gain.value, now);
+        }
+
+        function startAudioFadeOut(el) {
+            const timeLeft = Math.max(0.05, (el.duration || currentDuration) - el.currentTime);
+            rampActiveGain(0, timeLeft);
+        }
+
+        api?.onPlayVideo((clip) => {
+            // A TAKE during a KILL fade cancels the pending KILL cleanup, so it can't blank the new clip
+            if (killCleanupTimer) { clearTimeout(killCleanupTimer); killCleanupTimer = null; }
+            currentClip = clip;
+            fadeOutStarted = false;
+            currentFadeOut = clip.fadeOut || 0;
+            currentEndBehavior = clip.endBehavior || 'hold';
+            const fadeIn = clip.fadeIn || 0;
+            currentFadeIn = fadeIn;
+            const rot = clip.rotation || 0;
+
+            vid.pause();
+            vid.src = '';
+            img.src = '';
+            aud.pause();
+            aud.src = '';
+            vid.style.display = 'none';
+            img.style.display = 'none';
+
+            fadeOverlay.style.transition = 'none';
+            fadeOverlay.style.opacity = '0';
+
+            if (clip.type === 'image') {
+                img.style.display = 'block';
+                img.style.transform = `rotate(${rot}deg)`;
+                img.src = clip.url;
+                currentDuration = 0;
+                api.sendTimeUpdate(0, 0);
+
+                if (fadeIn > 0) {
+                    fadeOverlay.style.opacity = '1';
+                    setTimeout(() => {
+                        fadeOverlay.style.transition = `opacity ${fadeIn}s ease`;
+                        fadeOverlay.style.opacity = '0';
+                    }, 50);
+                }
+            } else if (clip.type === 'audio') {
+                aud.src = clip.url;
+                setGain(clip.gain, true);
+                if (fadeIn > 0) rampActiveGain(0, 0); // start silent; ramps up once playback starts
+                aud.loop = (clip.endBehavior === 'loop');
+                aud.currentTime = 0;
+                aud.play().then(() => {
+                    if (fadeIn > 0 && currentClip === clip) setTimeout(() => { if (currentClip === clip) rampActiveGain(clipGainValue(), fadeIn); }, 50);
+                }).catch(err => {
+                    // AbortError just means a newer TAKE or KILL replaced this clip
+                    if (err.name !== 'AbortError') api.logError(`Output Audio Playback Error: ${err.message}`);
+                });
+            } else {
+                vid.style.display = 'block';
+                vid.style.transform = `rotate(${rot}deg)`;
+                vid.src = clip.url;
+                vid.currentTime = 0;
+                vid.muted = false;
+                setGain(clip.gain, false);
+                vid.loop = (clip.endBehavior === 'loop');
+
+                if (fadeIn > 0) {
+                    fadeOverlay.style.opacity = '1';
+                    rampActiveGain(0, 0); // start silent; ramps up with the picture
+                }
+
+                vid.play().then(() => {
+                    if (fadeIn > 0) {
+                        setTimeout(() => {
+                            if (currentClip !== clip) return;
+                            fadeOverlay.style.transition = `opacity ${fadeIn}s ease`;
+                            fadeOverlay.style.opacity = '0';
+                            rampActiveGain(clipGainValue(), fadeIn);
+                        }, 50);
+                    }
+                }).catch(err => {
+                    if (err.name !== 'AbortError') api.logError(`Output Video Playback Error: ${err.message}`);
+                });
+            }
+        });
+
+        // Media failure: drop the output to clean black and tell the operator which clip failed.
+        // Clearing src ('') on TAKE/KILL also fires 'error' events, so only act when the element
+        // still holds the current clip's URL and actually reports a failure.
+        const MEDIA_ERROR_TEXT = { 1: 'LOAD ABORTED', 2: 'NETWORK/DISK READ ERROR', 3: 'DECODE ERROR (CORRUPT OR UNSUPPORTED CODEC)', 4: 'FILE MISSING OR FORMAT NOT SUPPORTED' };
+
+        function failToBlack(failedUrl, message) {
+            if (!currentClip || currentClip.url !== failedUrl) return;
+            const clipName = currentClip.originalName || currentClip.name || failedUrl;
+            currentClip = null;
+            fadeOutStarted = false;
+            vid.pause();
+            vid.style.display = 'none';
+            aud.pause();
+            img.style.display = 'none';
+            fadeOverlay.style.transition = 'none';
+            fadeOverlay.style.opacity = '1';
+            api?.sendTimeUpdate(0, 0);
+            if (api?.reportMediaError) api.reportMediaError({ url: failedUrl, message });
+            else api?.logError(`Output media error on "${clipName}": ${message}`);
+        }
+
+        function onMediaElementError(el) {
+            if (!el.error || !currentClip) return;
+            if (el.getAttribute('src') !== currentClip.url) return;
+            failToBlack(currentClip.url, MEDIA_ERROR_TEXT[el.error.code] || 'UNKNOWN MEDIA ERROR');
+        }
+
+        vid.addEventListener('error', () => onMediaElementError(vid));
+        aud.addEventListener('error', () => onMediaElementError(aud));
+        img.addEventListener('error', () => {
+            if (!currentClip || currentClip.type !== 'image') return;
+            if (img.getAttribute('src') !== currentClip.url) return;
+            if (!img.complete || img.naturalWidth > 0) return;
+            failToBlack(currentClip.url, 'IMAGE MISSING OR UNREADABLE');
+        });
+
+        // Broadcast timeupdates back to operator console!
+        vid.addEventListener('timeupdate', () => {
+            currentDuration = vid.duration || 0;
+            const cur = vid.currentTime;
+            
+            // Send timeupdate back to operator console
+            api?.sendTimeUpdate(cur, currentDuration);
+
+            // Handle loop wrap-around or backwards seek: reset fade. (Only a real jump back counts, so a
+            // clip shorter than its fade-out can't flip the fade on and off near the start.)
+            if (fadeOutStarted && cur < lastReportedTime - 0.5) {
+                fadeOutStarted = false;
+                fadeOverlay.style.transition = 'none';
+                fadeOverlay.style.opacity = '0';
+                rampActiveGain(clipGainValue(), 0);
+            }
+            lastReportedTime = cur;
+
+            // Trigger linear fade-out overlay (picture and sound together)
+            if (currentFadeOut > 0 && currentDuration > 0) {
+                const timeLeft = currentDuration - cur;
+                if (timeLeft <= currentFadeOut && !fadeOutStarted) {
+                    fadeOutStarted = true;
+                    fadeOverlay.style.transition = `opacity ${currentFadeOut}s linear`;
+                    fadeOverlay.style.opacity = '1';
+                    startAudioFadeOut(vid);
+                }
+            }
+        });
+
+        aud.addEventListener('timeupdate', () => {
+            currentDuration = aud.duration || 0;
+            const cur = aud.currentTime;
+            api?.sendTimeUpdate(cur, currentDuration);
+
+            if (fadeOutStarted && cur < lastReportedTime - 0.5) {
+                fadeOutStarted = false;
+                fadeOverlay.style.transition = 'none';
+                fadeOverlay.style.opacity = '0';
+                rampActiveGain(clipGainValue(), 0);
+            }
+            lastReportedTime = cur;
+
+            if (currentFadeOut > 0 && currentDuration > 0) {
+                const timeLeft = currentDuration - cur;
+                if (timeLeft <= currentFadeOut && !fadeOutStarted) {
+                    fadeOutStarted = true;
+                    fadeOverlay.style.transition = `opacity ${currentFadeOut}s linear`;
+                    fadeOverlay.style.opacity = '1';
+                    startAudioFadeOut(aud);
+                }
+            }
+        });
+
+        // Trigger Auto-Advance on ended!
+        vid.addEventListener('ended', () => {
+            if (currentEndBehavior === 'advance') {
+                api?.autoAdvance();
+            }
+        });
+
+        aud.addEventListener('ended', () => {
+            if (currentEndBehavior === 'advance') {
+                api?.autoAdvance();
+            }
+        });
+
+        api?.onProgramCommand((command, value) => {
+            if (command === 'play') {
+                const el = (currentClip?.type === 'audio') ? aud : vid;
+                el.play();
+                // Pick up a fade (picture + sound) that was frozen by PAUSE
+                if (fadeOutStarted) {
+                    const timeLeft = Math.max(0.05, (el.duration || currentDuration) - el.currentTime);
+                    fadeOverlay.style.transition = `opacity ${timeLeft}s linear`;
+                    fadeOverlay.style.opacity = '1';
+                    startAudioFadeOut(el);
+                } else if (currentFadeIn > 0 && el.currentTime < currentFadeIn) {
+                    const fadeLeft = currentFadeIn - el.currentTime;
+                    if (currentClip?.type !== 'audio') {
+                        fadeOverlay.style.transition = `opacity ${fadeLeft}s ease`;
+                        fadeOverlay.style.opacity = '0';
+                    }
+                    rampActiveGain(clipGainValue(), fadeLeft);
+                }
+            } else if (command === 'pause') {
+                if (currentClip?.type === 'audio') aud.pause();
+                else vid.pause();
+                // Freeze any fade where it is, so picture and sound stay together
+                const frozenOpacity = getComputedStyle(fadeOverlay).opacity;
+                fadeOverlay.style.transition = 'none';
+                fadeOverlay.style.opacity = frozenOpacity;
+                freezeActiveGain();
+            } else if (command === 'seek' || command === 'goto-end') {
+                fadeOutStarted = false;
+                fadeOverlay.style.transition = 'none';
+                fadeOverlay.style.opacity = '0';
+                rampActiveGain(clipGainValue(), 0);
+                const el = (currentClip?.type === 'audio') ? aud : vid;
+                if (command === 'seek') {
+                    el.currentTime = value;
+                } else if (command === 'goto-end') {
+                    el.currentTime = Math.max(0, (el.duration || currentDuration) - value);
+                }
+            }
+        });
+
+        // KILL: picture and sound both fade out over 1 second, then everything is cleared.
+        // The sound ramps the clip's gain node down linearly to silence alongside the black overlay.
+        function rampGainToSilence(node, seconds) {
+            if (!node || !audioCtx) return;
+            const now = audioCtx.currentTime;
+            node.gain.cancelScheduledValues(now);
+            node.gain.setValueAtTime(node.gain.value, now);
+            node.gain.linearRampToValueAtTime(0, now + seconds);
+        }
+
+        api?.onTriggerKill(() => {
+            fadeOutStarted = false;
+            fadeOverlay.style.transition = 'opacity 1s ease';
+            fadeOverlay.style.opacity = '1';
+            rampGainToSilence(vidGainNode, 1);
+            rampGainToSilence(audGainNode, 1);
+            if (killCleanupTimer) clearTimeout(killCleanupTimer);
+            killCleanupTimer = setTimeout(() => {
+                killCleanupTimer = null;
+                vid.pause();
+                vid.src = '';
+                vid.style.display = 'none';
+                img.src = '';
+                img.style.display = 'none';
+                aud.pause();
+                aud.src = '';
+                fadeOverlay.style.transition = 'none';
+                fadeOverlay.style.opacity = '0';
+            }, 1000);
+        });
+    </script>
+</body>
+</html>

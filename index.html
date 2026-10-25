@@ -1,0 +1,2008 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>PLAYBACK JOE 10.18.2 - OPERATOR</title>
+    <style>
+        * { box-sizing: border-box; }
+        /* Installed system monospace fonts only (no network fetch on show machines): Consolas on Windows, DejaVu/Liberation on Linux */
+        /* One brand blue (the HOLD blue) for every blue button, badge, slider and text */
+        :root { --blue: #0284c7; --blue-hover: #0369a1; }
+        :root { --font-mono: "Cascadia Mono", Consolas, "DejaVu Sans Mono", "Liberation Mono", "Ubuntu Mono", monospace; }
+        body {
+            background: #121212; 
+            color: #fff; 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+            margin: 0; 
+            display: grid; 
+            grid-template-columns: 1fr 480px; 
+            height: 100vh; 
+            user-select: none; 
+            text-transform: uppercase; 
+            overflow: hidden;
+        }
+        .left-pane, .right-pane { padding: 10px 16px 16px 16px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
+        .right-pane { background: #141414; border-left: 1px solid #262626; }
+        .right-pane > div { flex-shrink: 0; }
+        
+        * {
+            scrollbar-width: thin;
+            scrollbar-color: #333 #181818;
+        }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #181818; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #555; }
+
+        /* Both headers share one fixed height (= logo height) so the cuelist and CUE monitor start on the same line */
+        .right-header, .playlist-header { display: flex; justify-content: space-between; align-items: flex-start; height: 44px; flex-shrink: 0; }
+        .header-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+        .header-actions { display: flex; gap: 6px; align-items: center; }
+        
+        .btn-fs-top, .btn-action-text, .btn-clear, .btn-add { 
+            background: #222; 
+            color: #ccc; 
+            border: 1px solid #444; 
+            padding: 6px 10px; 
+            font-size: 10px; 
+            font-weight: bold; 
+            border-radius: 3px; 
+            cursor: pointer; 
+            letter-spacing: 0.5px; 
+            outline: none; 
+            text-transform: uppercase;
+            line-height: 13px; /* fixed so the ⛶ glyph on FULLSCREEN can't make its row taller than CLEAR/SAVE/LOAD */
+            transition: all 0.15s ease;
+        }
+        .btn-add { background: var(--blue); color: #fff; border-color: var(--blue); }
+        .btn-add:hover { background: var(--blue-hover); border-color: var(--blue-hover); }
+        .btn-fs-top:hover, .btn-action-text:hover { background: #333; color: #fff; border-color: #555; }
+        .btn-clear:hover { background: #500 !important; color: #fff !important; border-color: #ff4444 !important; }
+        .header-actions button:disabled { opacity: 0.35; cursor: not-allowed; pointer-events: none; }
+        .btn-fs-top.output-active { background: #16a34a !important; color: #fff !important; border-color: #22c55e !important; }
+        .btn-fs-top.fullscreen-active { background: var(--blue) !important; color: #fff !important; border-color: var(--blue) !important; }
+
+        #focus-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(0, 0, 0, 0.2);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 999999;
+            cursor: pointer;
+        }
+        .focus-modal {
+            width: 500px;
+            background: #1a1a1a;
+            border: 2px solid #b45309;
+            color: #fbbf24;
+            padding: 30px 20px;
+            border-radius: 6px;
+            text-align: center;
+            font-size: 20px;
+            font-weight: bold;
+            letter-spacing: 1px;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.8);
+            cursor: default;
+        }
+
+        #credits-modal-overlay, #clear-modal-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(0, 0, 0, 0.75);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 999999;
+        }
+
+        .monitor-wrapper { border: 2px solid #333; background: #000; border-radius: 4px; overflow: hidden; margin-bottom: 2px; }
+        .monitor-wrapper.preview-active { border-color: #f97316; } 
+        .monitor-wrapper.program-active { border-color: #28a745; } 
+
+        .monitor-bar { 
+            background: #1a1a1a; 
+            /* Fixed height so showing ON AIR / HOLD on TAKE can't grow the bar and shift the timecode */
+            height: 31px;
+            padding: 0 10px;
+            font-size: 11px;
+            font-weight: bold;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid #333;
+            overflow: hidden; 
+            text-overflow: ellipsis; 
+            white-space: nowrap; 
+            display: flex; 
+            align-items: center; 
+            justify-content: space-between;
+        }
+        .monitor-badge { font-size: 10px; font-weight: bold; letter-spacing: 0.5px; padding: 2px 6px; border-radius: 3px; flex-shrink: 0; }
+        /* Status text shown inside the CUE / PGM picture area (NO CLIP, NO OUTPUT, AUDIO CUE, MEDIA ERROR) */
+        .monitor-placeholder {
+            position: absolute; z-index: 30; max-width: 90%; text-align: center;
+            font-family: var(--font-mono); font-size: 16px; font-weight: bold; letter-spacing: 1px; line-height: 1.4;
+            color: #a3a3a3; overflow-wrap: anywhere;
+        }
+        .monitor-placeholder.is-error { color: #f87171; }
+        .audio-indicator {
+            position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+            font-family: var(--font-mono); font-weight: bold; text-align: center; padding: 0 16px;
+        }
+        .audio-indicator svg { width: 56px; height: 56px; stroke: var(--blue); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; animation: audio-pulse 1.6s ease-in-out infinite; }
+        .audio-indicator-label { font-size: 16px; letter-spacing: 1px; color: var(--blue); }
+        .audio-indicator-name { font-size: 13px; color: #a3a3a3; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .audio-indicator.paused svg { animation: none; opacity: 0.5; }
+        @keyframes audio-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+        .monitor-wrapper.preview-active .monitor-bar { color: #f97316; }
+        .monitor-wrapper.program-active .monitor-bar { color: #28a745; }
+
+        .monitor-box { 
+            width: 100%; 
+            aspect-ratio: 16 / 9; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            position: relative; 
+            background: #000; 
+            overflow: hidden; 
+        }
+
+        /* Timecode Container with Source Indicator and VU Meter */
+        .timecode-wrapper {
+            background: #000;
+            border: 1px solid #333;
+            border-radius: 4px;
+            margin-top: 4px;
+            padding: 4px 12px 8px 12px;
+            display: flex;
+            flex-direction: column;
+        }
+        .tc-ref-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 11px;
+            font-weight: bold;
+            letter-spacing: 0.5px;
+            color: #a3a3a3;
+            padding-bottom: 4px;
+            border-bottom: 1px solid #1f1f1f;
+            margin-bottom: 4px;
+            font-family: var(--font-mono);
+        }
+        .tc-ref-badge {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-weight: bold;
+            letter-spacing: 0.5px;
+        }
+        .tc-ref-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #22c55e;
+            box-shadow: 0 0 5px #22c55e;
+        }
+        .tc-ref-dot.dot-blue {
+            background: var(--blue);
+            box-shadow: 0 0 5px var(--blue);
+        }
+        .timecode-container { 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center;
+            font-family: var(--font-mono); 
+            font-size: 32px;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            letter-spacing: 1px;
+        }
+        .tc-elapsed { color: #fff; text-align: left; }
+        .tc-remaining { color: #ef4444; text-align: right; }
+
+        /* Dynamic 8-segment Audio VU Meter */
+        .vu-meter-container {
+            display: flex;
+            gap: 3px;
+            height: 24px;
+            align-items: flex-end;
+            padding: 0 8px;
+        }
+        .vu-bar {
+            width: 5px;
+            height: 4px;
+            background: #222;
+            border-radius: 1px;
+            transition: height 0.05s ease, background-color 0.05s ease;
+        }
+        .vu-bar.active-green { background: #22c55e; height: 14px; box-shadow: 0 0 4px rgba(34, 197, 94, 0.4); }
+        .vu-bar.active-amber { background: #f59e0b; height: 20px; box-shadow: 0 0 4px rgba(245, 158, 11, 0.4); }
+        .vu-bar.active-red { background: #ef4444; height: 24px; box-shadow: 0 0 6px rgba(239, 68, 68, 0.7); }
+
+        .transport-bar { display: flex; gap: 6px; margin-top: 6px; }
+        .transport-bar button { 
+            padding: 5px 6px;
+            font-size: 12px;
+            letter-spacing: 0.5px;
+            background: #222;
+            color: #ccc; 
+            border: 1px solid #444; 
+            border-radius: 3px; 
+            cursor: pointer; 
+            font-weight: bold; 
+            flex: 1; 
+            text-align: center; 
+            outline: none; 
+            transition: all 0.15s ease;
+        }
+        .transport-bar button:hover { background: #333; color: #fff; }
+        .btn-goto { background: var(--blue) !important; color: #fff !important; border-color: var(--blue) !important; }
+        .btn-goto:hover { background: var(--blue-hover) !important; border-color: var(--blue-hover) !important; color: #fff !important; }
+        
+        .scrub-slider { width: 100%; margin-top: 6px; accent-color: #28a745; cursor: pointer; height: 6px; background: #222; border-radius: 3px; }
+
+        .header-title-container { display: flex; align-items: center; gap: 8px; }
+        /* logo.png has ~10px of transparent space above the artwork at 50px tall; pull it up so the
+           visible top of the logo lines up with the top of the CLEAR/SAVE/LOAD buttons */
+        .header-logo { height: 50px; width: auto; object-fit: contain; cursor: pointer; display: block; margin-top: -10px; }
+        .header-logo:hover { opacity: 0.85; }
+
+        .version-badge { background: var(--blue); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px; font-weight: bold; letter-spacing: 0.5px; cursor: pointer; }
+        .version-badge:hover { background: var(--blue-hover); }
+
+        .format-hint { font-size: 10px; color: #8f8f8f; letter-spacing: 0.5px; padding-top: 2px; font-family: var(--font-mono); }
+        
+        .playlist { flex-grow: 1; background: #181818; border: 1px solid #2e2e2e; border-radius: 4px; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 6px; min-height: 200px; }
+        
+        .playlist-item { background: #222; cursor: pointer; display: flex; align-items: stretch; border-radius: 3px; overflow: hidden; border: 1px solid transparent; flex-shrink: 0; transition: border-color 0.15s ease, background 0.15s ease; }
+        .playlist-item:hover { background: #2c2c2c; }
+        .playlist-item.media-error { border-color: #dc2626; background: rgba(220, 38, 38, 0.12); }
+        .playlist-item.cued { border-color: #f97316; background: rgba(249, 115, 22, 0.1); }
+        .playlist-item.live { border-color: #28a745; background: rgba(40, 167, 69, 0.15); }
+
+        .cue-number-box { display: flex; align-items: center; justify-content: center; width: 50px; background: #161616; font-weight: 900; font-size: 20px; color: #777; border-right: 1px solid #333; flex-shrink: 0; font-family: var(--font-mono); cursor: pointer; }
+        .playlist-item.cued .cue-number-box { background: rgba(249, 115, 22, 0.25); color: #f97316; }
+        .playlist-item.live .cue-number-box { background: rgba(40, 167, 69, 0.25); color: #28a745; }
+        .playlist-item.media-error .cue-number-box { background: rgba(220, 38, 38, 0.3); color: #f87171; }
+        .media-error-tag { background: #7f1d1d !important; color: #fecaca !important; border-color: #dc2626 !important; }
+        .btn-fs-top.console-has-error { background: #7f1d1d; color: #fff; border-color: #dc2626; }
+
+        .cue-content { display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; flex-grow: 1; min-width: 0; }
+        .playlist-row { display: flex; justify-content: space-between; align-items: center; width: 100%; gap: 10px; }
+        /* min-width keeps roughly 30 characters of title visible (icon + ~220px of bold 12px caps) */
+        .clip-info { display: flex; align-items: center; gap: 8px; overflow: hidden; white-space: nowrap; font-size: 12px; flex: 1 1 0; min-width: 250px; font-weight: bold; }
+        /* The cue title is the part that gives way on narrow windows: cut with "…", full name on hover */
+        .clip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+        .media-icon svg { width: 18px; height: 18px; stroke: #999; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+        
+        .clip-right-group { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
+        .clip-controls { display: flex; align-items: center; gap: 12px; }
+        .control-group { display: flex; align-items: center; gap: 4px; font-size: 9px; color: #888; }
+        .control-group svg { width: 15px; height: 15px; stroke: #999; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+        
+        /* Custom-drawn fader (native accent-color can't colour the knob separately from the fill).
+           --vol-pct is the knob position, set from JS. Grey normally, red when boosted, blue knob at exactly 100%.
+           The faint centre line marks the 100% detent. */
+        .inline-volume {
+            --vol-fill: #888; --vol-thumb: #888; --vol-pct: 50%;
+            -webkit-appearance: none; appearance: none; width: 70px; height: 18px; margin: 0; cursor: pointer;
+            background: linear-gradient(to right, transparent calc(50% - 1px), #555 calc(50% - 1px), #555 calc(50% + 1px), transparent calc(50% + 1px)) no-repeat center / 100% 10px;
+        }
+        .inline-volume::-webkit-slider-runnable-track {
+            height: 4px; border-radius: 2px;
+            background: linear-gradient(to right, var(--vol-fill) 0, var(--vol-fill) var(--vol-pct), #3a3a3a var(--vol-pct), #3a3a3a 100%);
+        }
+        .inline-volume::-webkit-slider-thumb {
+            -webkit-appearance: none; appearance: none; width: 12px; height: 12px; margin-top: -4px;
+            border-radius: 50%; border: none; background: var(--vol-thumb);
+        }
+        .inline-volume.boosted { --vol-fill: #ef4444; --vol-thumb: #ef4444; }
+        .inline-volume.unity { --vol-thumb: var(--blue); }
+        .inline-volume:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        .cue-actions { display: flex; gap: 3px; align-items: center; }
+        .cue-btn { background: #181818; color: #999; border: 1px solid #333; width: 26px; height: 26px; font-size: 13px; font-weight: bold; border-radius: 3px; cursor: pointer; display: flex; align-items: center; justify-content: center; outline: none; }
+        .cue-btn:hover { background: #333; color: #fff; border-color: #555; }
+        .cue-btn:disabled { opacity: 0.2; cursor: default; }
+        .btn-delete-cue:hover { background: #500 !important; color: #fff !important; border-color: #ff4444 !important; }
+
+        .clip-badges { display: flex; gap: 3px; width: 135px; flex-shrink: 0; }
+        .badge { background: #1a1a1a; color: #555; border: 1px solid #333; padding: 3px 2px; font-size: 9px; cursor: pointer; border-radius: 3px; font-weight: bold; text-align: center; outline: none; flex: 1; min-width: 0; }
+        .badge.active-hold { background: var(--blue); color: #fff; border-color: var(--blue); }   
+        .badge.active-advance { background: #16a34a; color: #fff; border-color: #16a34a; } 
+        .badge.active-loop { background: #d97706; color: #fff; border-color: #d97706; }
+        .badge.active-rot { background: #7c3aed; color: #fff; border-color: #8b5cf6; }
+        .badge.disabled { background: #161616; color: #444; border-color: #222; cursor: default; }    
+        .badge:disabled { opacity: 0.4; cursor: not-allowed; }
+        .badge.badge-fixed { cursor: default; }
+        /* Invisible placeholders so image cues line up with video/audio cues */
+        .slot-spacer { visibility: hidden; pointer-events: none; }
+
+        .fade-row { display: flex; justify-content: space-between; align-items: center; width: 100%; padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.06); gap: 10px; }
+        .fade-left-group { display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; }
+        .fade-controls-group { display: flex; gap: 12px; align-items: center; }
+        .fade-group { display: flex; align-items: center; gap: 4px; font-size: 9px; color: #888; }
+        /* Same thin custom-drawn look as the volume fader. --fade-pct is set from JS.
+           Grey knob at 0.0S; blue fill + blue knob once a fade is set. */
+        .fade-group input[type="range"] {
+            --fade-fill: var(--blue); --fade-thumb: #888; --fade-pct: 0%;
+            -webkit-appearance: none; appearance: none; width: 65px; height: 18px; margin: 0; background: transparent; cursor: pointer;
+        }
+        .fade-group input[type="range"]::-webkit-slider-runnable-track {
+            height: 4px; border-radius: 2px;
+            background: linear-gradient(to right, var(--fade-fill) 0, var(--fade-fill) var(--fade-pct), #3a3a3a var(--fade-pct), #3a3a3a 100%);
+        }
+        .fade-group input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none; appearance: none; width: 12px; height: 12px; margin-top: -4px;
+            border-radius: 50%; border: none; background: var(--fade-thumb);
+        }
+        .fade-group input[type="range"].fade-active { --fade-thumb: var(--blue); }
+        .fade-group input[type="range"]:disabled { opacity: 0.4; cursor: not-allowed; }
+        .fade-group span { width: 20px; text-align: right; font-family: var(--font-mono); color: #ccc; }
+
+        /* Format / codec / resolution tags drop out one at a time when the row gets narrow:
+           row-reverse + wrap lays them out right-to-left, any tag that doesn't fit wraps onto a
+           second line, and the fixed height clips that line away. Format goes first, then codec,
+           then resolution. The runtime sits outside this group and is always shown. */
+        .cue-meta-info {
+            display: flex; flex-direction: row-reverse; flex-wrap: wrap; align-items: center; align-content: flex-start;
+            gap: 0 6px; height: 18px; overflow: hidden; flex: 1 1 0; min-width: 0;
+            font-family: var(--font-mono); font-size: 10px; color: #8f8f8f;
+        }
+        .cue-meta-info .meta-tag { line-height: 12px; white-space: nowrap; }
+        .meta-tag { color: #b5b5b5; background: #1c1c1c; border: 1px solid #333; padding: 2px 5px; border-radius: 2px; }
+        .runtime-badge { color: #e5e5e5; font-weight: bold; font-size: 12px; font-variant-numeric: tabular-nums; font-family: var(--font-mono); white-space: nowrap; flex-shrink: 0; }
+
+        .empty-playlist { color: #a3a3a3; text-align: center; margin: auto; padding: 40px 10px; display: flex; flex-direction: column; align-items: center; gap: 12px; font-family: var(--font-mono); }
+        /* Title and hint are sized so both lines are the same width (measured in Consolas) */
+        .empty-title { font-size: 22px; font-weight: bold; letter-spacing: 2px; color: #a3a3a3; white-space: nowrap; }
+        .empty-hint { font-size: 13.9px; font-weight: bold; letter-spacing: 0.5px; white-space: nowrap; }
+        .empty-key { color: #fff; background: var(--blue); padding: 2px 7px; border-radius: 3px; white-space: nowrap; }
+        
+        .controls { display: flex; gap: 10px; margin-top: 10px; }
+        button { font-weight: bold; cursor: pointer; border: none; border-radius: 4px; font-size: 13px; outline: none; }
+        .btn-take { background: #28a745; color: white; flex: 1; padding: 12px 16px; letter-spacing: 0.5px; } 
+        .btn-take:hover { background: #218838; }
+        .btn-kill { background: #500; color: white; flex: 1; border: 1px solid #ff4444; padding: 12px 16px; letter-spacing: 0.5px; }
+        .btn-kill:hover { background: #900; }
+
+        .shortcut-hint { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 6px 18px; font-size: 12px; font-weight: bold; color: #a3a3a3; font-family: var(--font-mono); background: #161616; padding: 7px 10px; border: 1px solid #282828; border-radius: 3px; flex-shrink: 0; }
+        .shortcut-hint .shortcut { display: inline-flex; align-items: center; gap: 5px; }
+        .shortcut-hint kbd { font-family: var(--font-mono); font-size: 11px; font-weight: bold; color: #e5e5e5; background: #262626; border: 1px solid #404040; border-bottom-width: 2px; border-radius: 3px; padding: 1px 6px; }
+        
+        .monitor-box video, .monitor-box img { width: 100%; height: 100%; object-fit: contain; opacity: 0; display: none; }
+    </style>
+</head>
+<body>
+    <div id="focus-overlay" onclick="this.style.display='none'">
+        <div class="focus-modal" onclick="event.stopPropagation()">NOT IN FOCUS - CLICK TO ACTIVATE</div>
+    </div>
+
+    <!-- About / Credits Modal Overlay -->
+    <div id="credits-modal-overlay" onclick="hideCredits()">
+        <div class="focus-modal" style="border-color: var(--blue); color: #fff; cursor: default; width: 440px;" onclick="event.stopPropagation()">
+            <img src="logo.png" alt="Playback Joe Logo" style="height: 44px; width: auto; object-fit: contain; margin-bottom: 12px;">
+            <div style="font-size: 13px; margin-bottom: 10px; color: var(--blue); font-weight: bold; letter-spacing: 1px;">ABOUT PLAYBACK JOE v10.18.2</div>
+            <div style="font-size: 14px; font-weight: normal; line-height: 1.6; color: #ddd;">
+                Designed by <strong style="color: #fff;">Joseph Stracuzzi</strong><br>
+                Coded with <strong style="color: #fff;">Gemini</strong> &amp; <strong style="color: #fff;">Claude</strong><br>
+                Audited &amp; Optimized with <strong style="color: #34d399;">Google AI Studio</strong>
+            </div>
+            <br>
+            <button onclick="hideCredits()" style="background: #222; color: #ccc; border: 1px solid #444; padding: 8px 20px; font-size: 11px; font-weight: bold; border-radius: 3px; cursor: pointer; outline: none; text-transform: uppercase;">CLOSE</button>
+        </div>
+    </div>
+
+    <!-- Clear Cuelist Confirmation Modal Overlay -->
+    <div id="clear-modal-overlay" onclick="hideClearModal()">
+        <div class="focus-modal" style="border-color: #ff4444; color: #fff; cursor: default; width: 440px;" onclick="event.stopPropagation()">
+            <div style="font-size: 14px; margin-bottom: 12px; color: #ff4444; font-weight: bold; letter-spacing: 1px;">CLEAR CUELIST</div>
+            <div style="font-size: 14px; font-weight: normal; line-height: 1.5; color: #ddd; margin-bottom: 24px;">
+                Are you sure you want to clear the cuelist?
+            </div>
+            <div style="display: flex; gap: 10px; justify-content: center;">
+                <button onclick="confirmClearCuelist()" style="background: #500; color: #fff; border: 1px solid #ff4444; padding: 8px 20px; font-size: 11px; font-weight: bold; border-radius: 3px; cursor: pointer; outline: none; text-transform: uppercase;">CLEAR</button>
+                <button onclick="hideClearModal()" style="background: #222; color: #ccc; border: 1px solid #444; padding: 8px 20px; font-size: 11px; font-weight: bold; border-radius: 3px; cursor: pointer; outline: none; text-transform: uppercase;">CANCEL</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Error Console Modal Pop-up -->
+    <div id="error-console-modal" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.8); display: none; align-items: center; justify-content: center; z-index: 999999;">
+        <div style="width: 720px; height: 460px; background: #1a1a1a; border: 1px solid #444; border-radius: 6px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 15px 35px rgba(0,0,0,0.9);">
+            <div style="background: #222; padding: 12px 16px; font-weight: bold; font-size: 11px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; color: #fff;">
+                <span>SYSTEM ERROR &amp; PLAYBACK CONSOLE</span>
+                <button onclick="toggleErrorConsole()" style="background: none; border: none; color: #aaa; cursor: pointer; font-size: 14px; font-weight: bold;">✕</button>
+            </div>
+            <div id="console-log-output" style="flex: 1; padding: 14px; font-family: var(--font-mono); font-size: 11px; overflow-y: auto; color: #f87171; background: #111; display: flex; flex-direction: column; gap: 6px; user-select: text; cursor: text;">
+                <div style="color: #666; font-style: italic;">No errors recorded yet. System operational.</div>
+            </div>
+            <div style="background: #181818; padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #333;">
+                <div style="display: flex; gap: 8px;">
+                    <button onclick="clearConsoleLogs()" style="background: #2a2a2a; color: #ccc; border: 1px solid #444; padding: 6px 12px; font-size: 10px; border-radius: 3px; cursor: pointer;">CLEAR LOGS</button>
+                    <button onclick="copyConsoleLogs()" style="background: #2a2a2a; color: #ccc; border: 1px solid #444; padding: 6px 12px; font-size: 10px; border-radius: 3px; cursor: pointer;">COPY LOGS</button>
+                </div>
+                <span style="font-size: 10px; color: #666;">PLAYBACK JOE v10.18.2</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden file upload inputs for browser environment -->
+    <input type="file" id="browser-media-input" multiple accept="video/*,audio/*,image/*" style="display: none;" onchange="handleBrowserMediaUpload(event)">
+    <input type="file" id="browser-json-input" accept=".json" style="display: none;" onchange="handleBrowserJsonUpload(event)">
+
+    <div class="left-pane">
+        <div class="playlist-header">
+            <div class="header-title-container">
+                <img src="logo.png" alt="Playback Joe" class="header-logo" onclick="showCredits()" title="Click for About / Credits">
+                <span class="version-badge" onclick="showCredits()" title="Click for About / Credits">v10.18.2</span>
+            </div>
+            <div class="header-right">
+                <div class="header-actions">
+                    <button class="btn-clear" onclick="clearCuelist()">CLEAR</button>
+                    <button class="btn-action-text" onclick="saveCuelist()">SAVE</button>
+                    <button class="btn-action-text" onclick="loadCuelist()">LOAD</button>
+                    <button class="btn-add" onclick="addLocalMedia()">+ ADD MEDIA</button>
+                </div>
+                <div class="format-hint">ACCEPTED: MP4, M4V, WEBM, MOV, MP3, WAV, AAC, JPG, PNG, GIF</div>
+            </div>
+        </div>
+
+        <div class="playlist" id="playlist">
+            <div class="empty-playlist" id="empty-msg">
+                <div class="empty-title">CUELIST IS EMPTY</div>
+                <div class="empty-hint">CLICK <span class="empty-key">+ ADD MEDIA</span> TO BEGIN</div>
+            </div>
+        </div>
+
+        <div class="shortcut-hint">
+            <span class="shortcut"><kbd>↑</kbd><kbd>↓</kbd> NAVIGATE</span>
+            <span class="shortcut"><kbd>ENTER</kbd><kbd>SPACE</kbd> TAKE</span>
+            <span class="shortcut"><kbd>ESC</kbd><kbd>BACKSPACE</kbd> KILL</span>
+        </div>
+    </div>
+
+    <div class="right-pane">
+        <div class="right-header">
+            <div></div>
+            <div class="header-right">
+                <div class="header-actions">
+                    <button class="btn-fs-top" id="btn-console" onclick="toggleErrorConsole(); this.blur();">CONSOLE</button>
+                    <button class="btn-fs-top output-active" id="btn-output-toggle" onclick="toggleOutputWindow(); this.blur();">OUTPUT</button>
+                    <button class="btn-fs-top fullscreen-active" id="btn-fullscreen-toggle" onclick="toggleFullscreen(); this.blur();">⛶ &nbsp; FULLSCREEN</button>
+                </div>
+                <div class="format-hint" style="visibility: hidden;">DUMMY</div>
+            </div>
+        </div>
+
+        <!-- CUE / PREVIEW MONITOR -->
+        <div>
+            <div class="monitor-wrapper preview-active">
+                <div class="monitor-bar" id="preview-bar-label">
+                    <span id="cue-title-text" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">CUE</span>
+                    <span id="cue-badge" class="monitor-badge" style="font-family: var(--font-mono); background: #222; border: 1px solid #333; color: #d4d4d4;">STANDBY</span>
+                </div>
+                <div class="monitor-box">
+                    <video id="preview-video" muted playsinline></video>
+                    <img id="preview-image" />
+                    <audio id="preview-audio"></audio>
+                    <span id="preview-placeholder" class="monitor-placeholder">NO CLIP</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- PGM / LIVE PROGRAM MONITOR -->
+        <div>
+            <div class="monitor-wrapper program-active">
+                <div id="program-clip-bar" class="monitor-bar">
+                    <span id="pgm-title-text" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">PGM: NO ACTIVE CLIP</span>
+                    <div id="pgm-status-badges" style="display: flex; gap: 6px; align-items: center; flex-shrink: 0;">
+                        <span id="pgm-hold-badge" class="monitor-badge" style="display: none; background: var(--blue); color: #fff;">HOLD</span>
+                        <span id="pgm-onair-badge" class="monitor-badge" style="display: none; background: #16a34a; color: #fff;">ON AIR</span>
+                    </div>
+                </div>
+                <div class="monitor-box">
+                    <video id="program-video" muted playsinline></video>
+                    <img id="program-image" />
+                    <audio id="program-audio"></audio>
+                    <div id="program-fade-overlay" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #000; opacity: 0; pointer-events: none; transition: none; z-index: 20;"></div>
+                    <span id="program-placeholder" class="monitor-placeholder">NO OUTPUT</span>
+                    <!-- Shown while an audio cue is on PGM (sits under the fade overlay so KILL fades it too) -->
+                    <div id="program-audio-indicator" class="audio-indicator" style="display: none;">
+                        <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
+                        <div class="audio-indicator-label">AUDIO PLAYING</div>
+                        <div class="audio-indicator-name" id="program-audio-name"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Timecode & Dynamic VU Meter -->
+            <div class="timecode-wrapper">
+                <div class="tc-ref-header">
+                    <span>ELAPSED</span>
+                    <div class="tc-ref-badge" id="tc-ref-badge">
+                        <span class="tc-ref-dot" id="tc-ref-dot"></span>
+                        <span id="tc-ref-text" style="color: #22c55e;">TIMECODE REF: SECONDARY OUTPUT</span>
+                    </div>
+                    <span>REMAINING</span>
+                </div>
+                <div class="timecode-container">
+                    <span id="prog-elapsed" class="tc-elapsed">00:00:00</span>
+                    <div class="vu-meter-container" id="vu-meter">
+                        <div class="vu-bar" data-threshold="0.2"></div>
+                        <div class="vu-bar" data-threshold="0.4"></div>
+                        <div class="vu-bar" data-threshold="0.6"></div>
+                        <div class="vu-bar" data-threshold="0.8"></div>
+                        <div class="vu-bar" data-threshold="1.0"></div>
+                        <div class="vu-bar" data-threshold="1.2"></div>
+                        <div class="vu-bar" data-threshold="1.5"></div>
+                        <div class="vu-bar" data-threshold="2.0"></div>
+                    </div>
+                    <span id="prog-remaining" class="tc-remaining">00:00:00</span>
+                </div>
+            </div>
+
+            <input type="range" id="prog-scrub" class="scrub-slider" min="0" max="100" value="0" step="0.1" oninput="scrubProgram(this.value)">
+            
+            <div class="transport-bar">
+                <button onclick="sendProgramCommand('play')">▶ PLAY</button>
+                <button onclick="sendProgramCommand('pause')">❚❚ PAUSE</button>
+                <button class="btn-goto" onclick="jumpToEnd(20)">GO TO 20</button>
+                <button class="btn-goto" onclick="jumpToEnd(10)">GO TO 10</button>
+            </div>
+            
+            <div class="controls">
+                <button class="btn-take" onclick="executeTake()">TAKE (ENTER / SPACE)</button>
+                <button class="btn-kill" onclick="triggerKill()">KILL (ESC)</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const rawIpc = (typeof require !== 'undefined') ? require('electron').ipcRenderer : null;
+        const api = window.playbackAPI || {
+            toggleOutputWindow: () => rawIpc?.send('toggle-output-window'),
+            toggleFullscreen: () => rawIpc?.send('toggle-fullscreen'),
+            cueVideo: (clip) => rawIpc?.send('cue-video', clip),
+            programCommand: (cmd, val) => rawIpc?.send('program-command', cmd, val),
+            triggerKill: () => rawIpc?.send('trigger-kill'),
+            autoAdvance: () => rawIpc?.send('auto-advance'),
+            sendTimeUpdate: (cur, dur) => rawIpc?.send('program-timeupdate', cur, dur),
+            sendAudioLevel: (lvl) => rawIpc?.send('audio-level-update', lvl),
+            openFileDialog: () => rawIpc?.invoke('dialog:openFile'),
+            saveCuelistDialog: (cues) => rawIpc?.invoke('dialog:saveCuelist', cues),
+            loadCuelistDialog: () => rawIpc?.invoke('dialog:loadCuelist'),
+            saveLastCuelist: (cues) => rawIpc?.send('save-last-cuelist', cues),
+            loadLastCuelist: () => rawIpc?.invoke('load-last-cuelist'),
+            onOutputWindowStatus: (cb) => rawIpc ? rawIpc.on('output-window-status', (e, s) => cb(s)) : undefined,
+            onMirrorProgram: (cb) => rawIpc ? rawIpc.on('mirror-program', (e, c) => cb(c)) : undefined,
+            onProgramCommand: (cb) => rawIpc ? rawIpc.on('program-command', (e, c, v) => cb(c, v)) : undefined,
+            onExecuteKill: (cb) => rawIpc ? rawIpc.on('execute-kill', () => cb()) : undefined,
+            onAutoAdvanceNext: (cb) => rawIpc ? rawIpc.on('auto-advance-next', () => cb()) : undefined,
+            onProgramTimeupdate: (cb) => rawIpc ? rawIpc.on('program-timeupdate', (e, t, d) => cb(t, d)) : undefined,
+            onAudioLevelUpdate: (cb) => rawIpc ? rawIpc.on('audio-level-update', (e, l) => cb(l)) : undefined,
+            onAppendConsoleLog: (cb) => rawIpc ? rawIpc.on('append-console-log', (e, m) => cb(m)) : undefined,
+        };
+        const ipcRenderer = rawIpc || {
+            send: (ch, ...args) => {
+                if (ch === 'toggle-output-window') api.toggleOutputWindow();
+                else if (ch === 'toggle-fullscreen') api.toggleFullscreen();
+                else if (ch === 'cue-video') api.cueVideo(args[0]);
+                else if (ch === 'program-command') api.programCommand(args[0], args[1]);
+                else if (ch === 'trigger-kill') api.triggerKill();
+                else if (ch === 'save-last-cuelist') api.saveLastCuelist(args[0]);
+            },
+            invoke: (ch, ...args) => {
+                if (ch === 'dialog:openFile') return api.openFileDialog();
+                if (ch === 'dialog:saveCuelist') return api.saveCuelistDialog(args[0]);
+                if (ch === 'dialog:loadCuelist') return api.loadCuelistDialog();
+                if (ch === 'load-last-cuelist') return api.loadLastCuelist();
+                return Promise.resolve(null);
+            },
+            on: (ch, handler) => {
+                if (ch === 'output-window-status') return api.onOutputWindowStatus(s => handler(null, s));
+                if (ch === 'mirror-program') return api.onMirrorProgram(c => handler(null, c));
+                if (ch === 'execute-kill') return api.onExecuteKill(() => handler(null));
+                if (ch === 'auto-advance-next') return api.onAutoAdvanceNext(() => handler(null));
+                if (ch === 'program-timeupdate') return api.onProgramTimeupdate((t, d) => handler(null, t, d));
+                if (ch === 'audio-level-update') return api.onAudioLevelUpdate(l => handler(null, l));
+                if (ch === 'append-console-log') return api.onAppendConsoleLog(m => handler(null, m));
+                if (ch === 'program-media-error') return api.onProgramMediaError?.(i => handler(null, i));
+            }
+        };
+        
+        let playlist = [];
+        let currentIndex = -1; 
+        let stagedIndex = -1;  
+        let currentProgramDuration = 0;
+        let programFadeOutStarted = false;
+        let lastProgramTime = 0;
+        let killTimer = null; 
+        let isKilling = false;
+        let isOutputWindowOpen = true;
+        let isOutputFullscreen = true;
+
+        ipcRenderer.on('output-window-status', (event, status) => {
+            const isOpen = typeof status === 'object' ? status.isOpen : status;
+            const isFullScreen = typeof status === 'object' ? status.isFullScreen : false;
+            isOutputWindowOpen = isOpen;
+            isOutputFullscreen = isFullScreen;
+
+            const progVid = document.getElementById('program-video');
+            if (progVid) progVid.muted = isOutputWindowOpen;
+            const progAud = document.getElementById('program-audio');
+            if (progAud && isOutputWindowOpen) {
+                progAud.pause();
+                progAud.src = "";
+            }
+
+            const btnOutput = document.getElementById('btn-output-toggle');
+            if (btnOutput) {
+                if (isOpen) {
+                    btnOutput.classList.add('output-active');
+                } else {
+                    btnOutput.classList.remove('output-active');
+                }
+            }
+
+            const btnFullscreen = document.getElementById('btn-fullscreen-toggle');
+            if (btnFullscreen) {
+                if (isOpen) {
+                    btnFullscreen.disabled = false;
+                    btnFullscreen.style.opacity = '1';
+                    btnFullscreen.style.cursor = 'pointer';
+                    btnFullscreen.title = 'Toggle Fullscreen Output';
+                    if (isFullScreen) {
+                        btnFullscreen.classList.add('fullscreen-active');
+                    } else {
+                        btnFullscreen.classList.remove('fullscreen-active');
+                    }
+                } else {
+                    btnFullscreen.disabled = true;
+                    btnFullscreen.style.opacity = '0.4';
+                    btnFullscreen.style.cursor = 'not-allowed';
+                    btnFullscreen.title = 'Output is inactive (enable Output display first)';
+                    btnFullscreen.classList.remove('fullscreen-active');
+                }
+            }
+
+            const tcRefText = document.getElementById('tc-ref-text');
+            const tcRefDot = document.getElementById('tc-ref-dot');
+            if (tcRefText && tcRefDot) {
+                if (isOpen) {
+                    tcRefText.innerText = 'TIMECODE REF: SECONDARY OUTPUT';
+                    tcRefText.style.color = '#22c55e';
+                    tcRefDot.className = 'tc-ref-dot';
+                } else {
+                    tcRefText.innerText = 'TIMECODE REF: PGM (OUTPUT CLOSED)';
+                    tcRefText.style.color = 'var(--blue)';
+                    tcRefDot.className = 'tc-ref-dot dot-blue';
+                }
+            }
+        });
+
+        // Dynamic Audio VU Meter updater
+        ipcRenderer.on('audio-level-update', (event, level) => {
+            updateVuMeter(level);
+        });
+
+        // Local VU metering for when the output window is closed and the PGM monitor here is the real
+        // audio output. Uses the same level formula as output.html so the meter reads the same either way.
+        // Created on the first TAKE with the output closed. createMediaElementSource reroutes the
+        // elements' audio through this context permanently, so the analyser is wired to the speakers
+        // before any element is attached, and the context is resumed if it ever reports suspended.
+        let localAudioCtx = null;
+        let localAnalyser = null;
+        let localLevelData = null;
+        let localOutGain = null; // master gain for the PGM monitor's audio, ramped to silence on KILL
+
+        function initLocalMeter() {
+            if (localAudioCtx) {
+                if (localAudioCtx.state === 'suspended') localAudioCtx.resume();
+                return;
+            }
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const analyser = ctx.createAnalyser();
+                analyser.fftSize = 64;
+                analyser.connect(ctx.destination);
+                const outGain = ctx.createGain();
+                outGain.connect(analyser);
+                ['program-video', 'program-audio'].forEach(id => {
+                    ctx.createMediaElementSource(document.getElementById(id)).connect(outGain);
+                });
+                localAudioCtx = ctx;
+                localAnalyser = analyser;
+                localOutGain = outGain;
+                localLevelData = new Uint8Array(analyser.frequencyBinCount);
+                if (ctx.state === 'suspended') ctx.resume();
+                requestAnimationFrame(localMeterLoop);
+            } catch (err) {
+                appendConsoleLog(`Local audio meter unavailable: ${err.message}`);
+            }
+        }
+
+        // Ramp the PGM monitor's audio (output-closed mode) to a level over `seconds` (0 = jump now).
+        // `from` sets the starting level explicitly (otherwise the current level is used).
+        function rampLocalAudio(target, seconds, from) {
+            if (!localAudioCtx || !localOutGain) return;
+            const g = localOutGain.gain;
+            const now = localAudioCtx.currentTime;
+            g.cancelScheduledValues(now);
+            g.setValueAtTime(seconds > 0 ? (from !== undefined ? from : g.value) : target, now);
+            if (seconds > 0) g.linearRampToValueAtTime(target, now + seconds);
+        }
+
+        function freezeLocalAudio() {
+            if (!localAudioCtx || !localOutGain) return;
+            const g = localOutGain.gain;
+            const now = localAudioCtx.currentTime;
+            g.cancelScheduledValues(now);
+            g.setValueAtTime(g.value, now);
+        }
+
+        function localMeterLoop() {
+            if (!isOutputWindowOpen) {
+                const clip = playlist[currentIndex];
+                const progVid = document.getElementById('program-video');
+                const progAud = document.getElementById('program-audio');
+                let level = 0;
+                if (clip && clip.type !== 'image' && !isKilling && (!progVid.paused || !progAud.paused)) {
+                    localAnalyser.getByteFrequencyData(localLevelData);
+                    let sum = 0;
+                    for (let i = 0; i < localLevelData.length; i++) sum += localLevelData[i];
+                    const gainVal = clip.gain !== undefined ? clip.gain : 1.0;
+                    level = (sum / localLevelData.length / 255) * gainVal * 2.0;
+                }
+                updateVuMeter(level);
+            }
+            requestAnimationFrame(localMeterLoop);
+        }
+
+        function updateVuMeter(level) {
+            const bars = document.querySelectorAll('#vu-meter .vu-bar');
+            bars.forEach(bar => {
+                const threshold = parseFloat(bar.getAttribute('data-threshold'));
+                const active = currentIndex !== -1 && level >= threshold;
+                bar.classList.remove('active-green', 'active-amber', 'active-red');
+                if (active) {
+                    if (threshold >= 1.2) bar.classList.add('active-red');
+                    else if (threshold >= 0.8) bar.classList.add('active-amber');
+                    else bar.classList.add('active-green');
+                }
+            });
+        }
+
+        function showCredits() {
+            document.getElementById('credits-modal-overlay').style.display = 'flex';
+        }
+
+        function hideCredits() {
+            document.getElementById('credits-modal-overlay').style.display = 'none';
+        }
+
+        function hideClearModal() {
+            document.getElementById('clear-modal-overlay').style.display = 'none';
+        }
+
+        function toggleErrorConsole() {
+            const modal = document.getElementById('error-console-modal');
+            modal.style.display = modal.style.display === 'flex' ? 'none' : 'flex';
+            if (modal.style.display === 'flex') document.getElementById('btn-console')?.classList.remove('console-has-error');
+        }
+
+        function toggleOutputWindow() {
+            // Toggling OUTPUT stops all playback and returns state to idle (black)
+            if (killTimer) {
+                clearTimeout(killTimer);
+                killTimer = null;
+            }
+            isKilling = false;
+            currentIndex = -1;
+            currentProgramDuration = 0;
+            setProgramAudioIndicator(null);
+
+            const progVid = document.getElementById('program-video');
+            const progImg = document.getElementById('program-image');
+            const progAud = document.getElementById('program-audio');
+            const progFade = document.getElementById('program-fade-overlay');
+            if (progVid) { progVid.pause(); progVid.src = ''; progVid.style.display = 'none'; }
+            if (progImg) { progImg.src = ''; progImg.style.display = 'none'; }
+            if (progAud) { progAud.pause(); progAud.src = ''; }
+            if (progFade) { progFade.style.transition = 'none'; progFade.style.opacity = '0'; }
+            
+            const progPlaceholder = document.getElementById('program-placeholder');
+            if (progPlaceholder) {
+                progPlaceholder.innerText = 'NO OUTPUT';
+                progPlaceholder.classList.remove('is-error');
+                progPlaceholder.style.display = 'block';
+            }
+            const pgmTitle = document.getElementById('pgm-title-text');
+            if (pgmTitle) pgmTitle.innerText = 'PGM: NO ACTIVE CLIP';
+            const onAirBadge = document.getElementById('pgm-onair-badge');
+            if (onAirBadge) onAirBadge.style.display = 'none';
+            const holdBadge = document.getElementById('pgm-hold-badge');
+            if (holdBadge) holdBadge.style.display = 'none';
+
+            document.getElementById('prog-elapsed').innerText = '00:00:00';
+            document.getElementById('prog-remaining').innerText = '00:00:00';
+            document.getElementById('prog-scrub').value = 0;
+            updateVuMeter(0);
+
+            if (playlist.length > 0 && stagedIndex < 0) {
+                selectClip(0);
+            }
+            renderPlaylist();
+
+            ipcRenderer.send('toggle-output-window');
+        }
+
+        function toggleFullscreen() {
+            if (!isOutputWindowOpen) return;
+            ipcRenderer.send('toggle-fullscreen');
+        }
+
+        function clearConsoleLogs() {
+            const logContainer = document.getElementById('console-log-output');
+            logContainer.innerHTML = '<div style="color: #666; font-style: italic;">Console cleared.</div>';
+        }
+
+        function copyConsoleLogs() {
+            const logContainer = document.getElementById('console-log-output');
+            navigator.clipboard.writeText(logContainer.innerText).then(() => {
+                appendConsoleLog("Logs copied to clipboard.", false);
+            }).catch(err => {
+                appendConsoleLog("Failed to copy logs: " + err.message, true);
+            });
+        }
+
+        function appendConsoleLog(message, isError = true) {
+            const logContainer = document.getElementById('console-log-output');
+            if (logContainer.innerHTML.includes('No errors recorded yet')) {
+                logContainer.innerHTML = '';
+            }
+            const timestamp = new Date().toLocaleTimeString();
+            const logItem = document.createElement('div');
+            logItem.style.color = isError ? '#f87171' : 'var(--blue)';
+            logItem.innerText = `[${timestamp}] ${message}`;
+            logContainer.appendChild(logItem);
+            logContainer.scrollTop = logContainer.scrollHeight;
+            // Flag the CONSOLE button red until the operator opens the console
+            if (isError && document.getElementById('error-console-modal').style.display !== 'flex') {
+                document.getElementById('btn-console')?.classList.add('console-has-error');
+            }
+        }
+
+        ipcRenderer.on('append-console-log', (event, message) => {
+            appendConsoleLog(message, true);
+        });
+
+        const videoSvg = `<svg viewBox="0 0 24 24"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>`;
+        const imageSvg = `<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>`;
+        const audioSvg = `<svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>`;
+        const volumeSvg = `<svg viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>`;
+
+        function formatTimecode(seconds) {
+            if (isNaN(seconds) || seconds < 0) return "00:00:00";
+            const hrs = Math.floor(seconds / 3600).toString().padStart(2, '0');
+            const mins = Math.floor((seconds % 3600) / 60).toString().padStart(2, '0');
+            const secs = Math.floor(seconds % 60).toString().padStart(2, '0');
+            return `${hrs}:${mins}:${secs}`;
+        }
+
+        function extractFormat(filename) {
+            if (!filename) return 'MEDIA';
+            const parts = filename.split('.');
+            return parts.length > 1 ? parts.pop().toUpperCase() : 'MEDIA';
+        }
+
+        function removeExtension(filename) {
+            if (!filename) return '';
+            const lastDot = filename.lastIndexOf('.');
+            return lastDot > 0 ? filename.substring(0, lastDot) : filename;
+        }
+
+        function extractCodec(filename, type) {
+            if (!filename) return 'H.264 / AAC';
+            const ext = filename.split('.').pop().toLowerCase();
+            if (ext === 'mp4' || ext === 'm4v') return 'H.264 / AAC';
+            if (ext === 'webm') return 'VP9 / Opus';
+            if (ext === 'mov') return 'ProRes / H.264';
+            if (ext === 'mp3') return 'MPEG Layer 3';
+            if (ext === 'wav') return 'Linear PCM 24-bit';
+            if (ext === 'aac') return 'AAC-LC';
+            if (['jpg', 'jpeg'].includes(ext)) return 'JPEG Baseline';
+            if (ext === 'png') return 'PNG Truecolor';
+            if (ext === 'gif') return 'GIF89a';
+            return type === 'image' ? 'Raster Graphic' : 'H.264 / AAC';
+        }
+
+        function loadClipMetadata(clip, callback) {
+            if (clip.type === 'image') {
+                const img = new Image();
+                img.src = clip.url;
+                img.onload = () => {
+                    delete clip.mediaError;
+                    clip.resolution = `${img.naturalWidth}X${img.naturalHeight}`;
+                    clip.durationStr = 'IMAGE';
+                    if (callback) callback();
+                    renderPlaylist();
+                };
+                img.onerror = () => {
+                    clip.mediaError = 'IMAGE MISSING OR UNREADABLE';
+                    clip.resolution = 'UNKNOWN';
+                    clip.durationStr = 'IMAGE';
+                    if (callback) callback();
+                    renderPlaylist();
+                };
+                return;
+            }
+
+            if (clip.type === 'audio') {
+                clip.resolution = 'AUDIO';
+                const audio = document.createElement('audio');
+                audio.src = clip.url;
+                audio.onloadedmetadata = () => {
+                    delete clip.mediaError;
+                    clip.durationStr = formatTimecode(audio.duration);
+                    clip.duration = audio.duration;
+                    if (callback) callback();
+                    renderPlaylist();
+                };
+                audio.onerror = () => {
+                    clip.mediaError = 'AUDIO FILE MISSING OR UNREADABLE';
+                    clip.durationStr = '--:--:--';
+                    if (callback) callback();
+                    renderPlaylist();
+                };
+                return;
+            }
+
+            if (!clip.mediaError && clip.durationStr && clip.durationStr !== 'LOADING...' && clip.resolution) {
+                if (callback) callback();
+                return;
+            }
+
+            clip.durationStr = 'LOADING...';
+            clip.resolution = 'LOADING...';
+            const vid = document.createElement('video');
+            vid.src = clip.url;
+            vid.onloadedmetadata = () => {
+                delete clip.mediaError;
+                clip.resolution = `${vid.videoWidth}X${vid.videoHeight}`;
+                clip.durationStr = formatTimecode(vid.duration);
+                clip.duration = vid.duration;
+                if (callback) callback();
+                renderPlaylist();
+            };
+            vid.onerror = () => {
+                clip.mediaError = 'VIDEO FILE MISSING OR UNREADABLE';
+                clip.resolution = 'UNKNOWN';
+                clip.durationStr = '--:--:--';
+                if (callback) callback();
+                renderPlaylist();
+            };
+        }
+
+        function saveStateToLocalStorage() {
+            try {
+                const cleanData = playlist.map(c => ({
+                    originalName: c.originalName || c.name,
+                    name: c.name,
+                    url: c.url,
+                    type: c.type,
+                    gain: c.gain !== undefined ? c.gain : 1.0,
+                    fadeIn: c.fadeIn !== undefined ? c.fadeIn : 0.0,
+                    fadeOut: c.fadeOut !== undefined ? c.fadeOut : 0.0,
+                    rotation: c.rotation || 0,
+                    endBehavior: c.endBehavior || 'hold',
+                    format: c.format,
+                    codec: c.codec,
+                    resolution: c.resolution,
+                    duration: c.duration,
+                    durationStr: c.durationStr
+                }));
+                localStorage.setItem('playback-joe-last-cuelist', JSON.stringify(cleanData));
+                ipcRenderer.send('save-last-cuelist', playlist);
+            } catch (err) {}
+        }
+
+        function moveClip(idx, direction) {
+            if (currentIndex !== -1) return;
+            const targetIdx = idx + direction;
+            if (targetIdx < 0 || targetIdx >= playlist.length) return;
+
+            const item = playlist.splice(idx, 1)[0];
+            playlist.splice(targetIdx, 0, item);
+
+            if (stagedIndex === idx) {
+                stagedIndex = targetIdx;
+            } else if (stagedIndex === targetIdx) {
+                stagedIndex = idx;
+            }
+
+            renderPlaylist();
+            selectClip(stagedIndex);
+            saveStateToLocalStorage();
+        }
+
+        function deleteClip(idx) {
+            if (idx < 0 || idx >= playlist.length) return;
+            if (idx === currentIndex) {
+                appendConsoleLog("[WARNING] Cannot delete the currently LIVE clip. Kill it first.");
+                return;
+            }
+
+            playlist.splice(idx, 1);
+
+            if (playlist.length === 0) {
+                currentIndex = -1;
+                stagedIndex = -1;
+                document.getElementById('preview-video').style.display = 'none';
+                document.getElementById('preview-image').style.display = 'none';
+                document.getElementById('preview-audio').pause();
+                document.getElementById('preview-audio').src = '';
+                document.getElementById('preview-placeholder').style.display = 'block';
+                document.getElementById('cue-title-text').innerText = "CUE";
+                document.getElementById('cue-badge').innerText = "STANDBY";
+            } else {
+                const nextSelect = Math.min(idx, playlist.length - 1);
+                selectClip(nextSelect);
+            }
+
+            renderPlaylist();
+            saveStateToLocalStorage();
+        }
+
+        function cycleClipRotation(idx) {
+            if (idx === currentIndex) return;
+            const clip = playlist[idx];
+            if (!clip) return;
+            const angles = [0, 90, 180, 270];
+            const currentRot = clip.rotation || 0;
+            const nextIdx = (angles.indexOf(currentRot) + 1) % angles.length;
+            clip.rotation = angles[nextIdx];
+            renderPlaylist();
+            if (stagedIndex === idx) {
+                selectClip(idx);
+            }
+            saveStateToLocalStorage();
+        }
+
+        // CLEAR / SAVE / LOAD / ADD MEDIA are locked while any cue is live on program
+        function isCuelistLocked() {
+            return currentIndex !== -1;
+        }
+
+        function updateCuelistLock() {
+            const locked = isCuelistLocked();
+            document.querySelectorAll('.header-actions .btn-clear, .header-actions .btn-action-text, .header-actions .btn-add').forEach(btn => {
+                btn.disabled = locked;
+                btn.title = locked ? 'LOCKED WHILE A CUE IS LIVE - KILL FIRST' : '';
+            });
+        }
+
+        function renderPlaylist() {
+            updateCuelistLock();
+            const container = document.getElementById('playlist');
+            const emptyMsg = document.getElementById('empty-msg');
+            
+            if (playlist.length === 0) {
+                if (emptyMsg) emptyMsg.style.display = 'flex';
+                container.innerHTML = '';
+                if (emptyMsg) container.appendChild(emptyMsg);
+                return;
+            }
+            if (emptyMsg) emptyMsg.style.display = 'none';
+
+            const isPlaying = currentIndex !== -1;
+
+            container.innerHTML = '';
+            playlist.forEach((clip, idx) => {
+                const item = document.createElement('div');
+                let stateClass = '';
+                if (idx === currentIndex) stateClass = 'live';
+                else if (idx === stagedIndex) stateClass = 'cued';
+
+                const isLive = (idx === currentIndex);
+                let iconHtml = videoSvg;
+                if (clip.type === 'image') iconHtml = imageSvg;
+                if (clip.type === 'audio') iconHtml = audioSvg;
+
+                const isBoosted = clip.gain > 1.0;
+                const cueNumStr = (idx + 1).toString().padStart(2, '0');
+                const fileFormat = clip.format || extractFormat(clip.originalName || clip.name);
+                const codecStr = clip.codec || extractCodec(clip.originalName || clip.name, clip.type);
+                const resStr = clip.resolution || 'LOADING...';
+                const runtimeStr = clip.durationStr || 'LOADING...';
+                const rotVal = clip.rotation || 0;
+
+                let badgesHtml = '';
+                let fadeRowHtml = '';
+
+                if (clip.type !== 'image') {
+                    badgesHtml = `
+                        <div class="clip-badges">
+                            <button class="badge ${clip.endBehavior === 'hold' ? 'active-hold' : ''}" ${isLive ? 'disabled' : ''} onclick="setClipBehavior(${idx}, 'hold')">HOLD</button>
+                            <button class="badge ${clip.endBehavior === 'advance' ? 'active-advance' : ''}" ${isLive ? 'disabled' : ''} onclick="setClipBehavior(${idx}, 'advance')">ADV</button>
+                            <button class="badge ${clip.endBehavior === 'loop' ? 'active-loop' : ''}" ${isLive ? 'disabled' : ''} onclick="setClipBehavior(${idx}, 'loop')">LOOP</button>
+                            <button class="badge ${rotVal > 0 ? 'active-rot' : ''}" ${isLive ? 'disabled' : ''} onclick="cycleClipRotation(${idx})" title="Rotation Angle">${rotVal}°</button>
+                        </div>
+                    `;
+                } else {
+                    badgesHtml = `
+                        <div class="clip-badges">
+                            <button class="badge active-hold badge-fixed" title="PHOTOS ALWAYS HOLD">HOLD</button>
+                            <span class="badge slot-spacer" aria-hidden="true"></span>
+                            <span class="badge slot-spacer" aria-hidden="true"></span>
+                            <button class="badge ${rotVal > 0 ? 'active-rot' : ''}" ${isLive ? 'disabled' : ''} onclick="cycleClipRotation(${idx})" title="Rotation Angle">${rotVal}°</button>
+                        </div>
+                    `;
+                }
+
+                let fadeControlsHtml = `
+                    <div class="fade-group">
+                        <span>IN:</span>
+                        <input type="range" class="${clip.fadeIn > 0 ? 'fade-active' : ''}" style="--fade-pct: ${clip.fadeIn / 5 * 100}%" min="0" max="5" step="0.5" value="${clip.fadeIn}" ${isLive ? 'disabled' : ''} oninput="setClipFade(${idx}, 'fadeIn', this.value, this)" onchange="this.blur()" onmouseup="this.blur()">
+                        <span id="fadein-val-${idx}">${clip.fadeIn.toFixed(1)}S</span>
+                    </div>
+                `;
+
+                if (clip.type !== 'image') {
+                    fadeControlsHtml += `
+                        <div class="fade-group">
+                            <span>OUT:</span>
+                            <input type="range" class="${clip.fadeOut > 0 ? 'fade-active' : ''}" style="--fade-pct: ${clip.fadeOut / 5 * 100}%" min="0" max="5" step="0.5" value="${clip.fadeOut}" ${isLive ? 'disabled' : ''} oninput="setClipFade(${idx}, 'fadeOut', this.value, this)" onchange="this.blur()" onmouseup="this.blur()">
+                            <span id="fadeout-val-${idx}">${clip.fadeOut.toFixed(1)}S</span>
+                        </div>
+                    `;
+                } else {
+                    fadeControlsHtml += `
+                        <div class="fade-group slot-spacer" aria-hidden="true">
+                            <span>OUT:</span>
+                            <input type="range" tabindex="-1" disabled>
+                            <span>0.0S</span>
+                        </div>
+                    `;
+                }
+
+                fadeRowHtml = `
+                    <div class="fade-row" onclick="event.stopPropagation()">
+                        <div class="fade-left-group">
+                            ${badgesHtml}
+                            <div class="fade-controls-group">
+                                ${fadeControlsHtml}
+                            </div>
+                        </div>
+                        <div class="cue-meta-info">
+                            ${clip.mediaError ? `<span class="meta-tag media-error-tag" title="${clip.mediaError}">MEDIA ERROR</span>` : ''}
+                            <span class="meta-tag">${resStr}</span>
+                            <span class="meta-tag">${codecStr}</span>
+                            <span class="meta-tag">${fileFormat}</span>
+                        </div>
+                        <span class="runtime-badge">${runtimeStr}</span>
+                    </div>
+                `;
+
+                item.className = `playlist-item ${stateClass}${clip.mediaError ? ' media-error' : ''}`;
+                item.innerHTML = `
+                    <div class="cue-number-box" onclick="event.stopPropagation(); selectClip(${idx})" title="Select Cue ${idx + 1}">${cueNumStr}</div>
+                    <div class="cue-content" onclick="selectClip(${idx})">
+                        <div class="playlist-row">
+                            <div class="clip-info">
+                                <span class="media-icon">${iconHtml}</span>
+                                <span class="clip-name" title="${clip.name}">${clip.name}</span>
+                            </div>
+                            <div class="clip-right-group" onclick="event.stopPropagation()">
+                                <div class="clip-controls">
+                                    <div class="control-group">
+                                        ${volumeSvg}
+                                        <input type="range" id="vol-input-${idx}" class="inline-volume ${volumeStateClass(clip.gain)}" min="0" max="200" step="1" value="${gainToFaderPos(clip.gain)}" style="--vol-pct: ${gainToFaderPos(clip.gain) / 2}%" ${isLive ? 'disabled' : ''} oninput="setClipGain(${idx}, this.value)" onchange="this.blur()" onmouseup="this.blur()" title="VOLUME: ${Math.round(clip.gain * 100)}%">
+                                    </div>
+                                </div>
+                                <div class="cue-actions">
+                                    <button class="cue-btn" onclick="moveClip(${idx}, -1)" ${idx === 0 || isPlaying ? 'disabled' : ''} title="Move Up">▲</button>
+                                    <button class="cue-btn" onclick="moveClip(${idx}, 1)" ${idx === playlist.length - 1 || isPlaying ? 'disabled' : ''} title="Move Down">▼</button>
+                                    <button class="cue-btn btn-delete-cue" onclick="deleteClip(${idx})" ${isLive ? 'disabled' : ''} title="${isLive ? 'Cannot delete LIVE cue' : 'Delete Cue'}">×</button>
+                                </div>
+                            </div>
+                        </div>
+                        ${fadeRowHtml}
+                    </div>
+                `;
+                container.appendChild(item);
+            });
+        }
+
+        function clearCuelist() {
+            if (playlist.length === 0) return;
+            if (isCuelistLocked()) return;
+            document.getElementById('clear-modal-overlay').style.display = 'flex';
+        }
+
+        function confirmClearCuelist() {
+            hideClearModal();
+            if (isCuelistLocked()) return;
+            playlist = [];
+            currentIndex = -1;
+            stagedIndex = -1;
+            renderPlaylist();
+            triggerKill();
+            document.getElementById('preview-video').style.display = 'none';
+            document.getElementById('preview-image').style.display = 'none';
+            document.getElementById('preview-audio').pause();
+            document.getElementById('preview-audio').src = '';
+            document.getElementById('preview-placeholder').style.display = 'block';
+            document.getElementById('cue-title-text').innerText = "CUE";
+            document.getElementById('cue-badge').innerText = "STANDBY";
+            saveStateToLocalStorage();
+        }
+
+        function setClipBehavior(idx, behavior) {
+            if (playlist[idx].type === 'image' || idx === currentIndex) return;
+            playlist[idx].endBehavior = behavior;
+            renderPlaylist();
+            if (stagedIndex === idx) {
+                if (playlist[idx].type === 'video') {
+                    document.getElementById('preview-video').loop = (behavior === 'loop');
+                } else if (playlist[idx].type === 'audio') {
+                    document.getElementById('preview-audio').loop = (behavior === 'loop');
+                }
+            }
+            saveStateToLocalStorage();
+        }
+
+        // Volume fader travel is 0-200 with 100% gain at the centre: the left half covers 0-100%,
+        // the right half 100-300%. Positions within VOL_DETENT of centre snap to exactly 100%.
+        const VOL_DETENT = 6;
+        function gainToFaderPos(gain) {
+            const g = Math.max(0, Math.min(3, gain !== undefined ? gain : 1.0));
+            return g <= 1 ? Math.round(g * 100) : Math.round(100 + (g - 1) * 50);
+        }
+        function faderPosToGain(pos) {
+            return pos <= 100 ? pos / 100 : 1 + (pos - 100) / 50;
+        }
+        function volumeStateClass(gain) {
+            return gain > 1.0 ? 'boosted' : (gain === 1.0 ? 'unity' : '');
+        }
+
+        function setClipGain(idx, faderPos) {
+            if (idx === currentIndex) return;
+            let pos = parseInt(faderPos, 10);
+            const inputEl = document.getElementById(`vol-input-${idx}`);
+            if (Math.abs(pos - 100) <= VOL_DETENT) {
+                pos = 100;
+                if (inputEl) inputEl.value = 100;
+            }
+            playlist[idx].gain = Math.round(faderPosToGain(pos) * 100) / 100;
+            if (inputEl) {
+                inputEl.style.setProperty('--vol-pct', `${pos / 2}%`);
+                inputEl.classList.remove('boosted', 'unity');
+                const stateClass = volumeStateClass(playlist[idx].gain);
+                if (stateClass) inputEl.classList.add(stateClass);
+                inputEl.title = `VOLUME: ${Math.round(playlist[idx].gain * 100)}%`;
+            }
+            saveStateToLocalStorage();
+        }
+
+        function setClipFade(idx, type, fadeVal, inputEl) {
+            if (idx === currentIndex) return;
+            const val = parseFloat(fadeVal);
+            playlist[idx][type] = val;
+            if (inputEl) {
+                inputEl.style.setProperty('--fade-pct', `${val / 5 * 100}%`);
+                inputEl.classList.toggle('fade-active', val > 0);
+            }
+            const spanEl = document.getElementById(`${type.toLowerCase()}-val-${idx}`);
+            if (spanEl) {
+                spanEl.innerText = `${val.toFixed(1)}S`;
+            }
+            saveStateToLocalStorage();
+        }
+
+        async function addLocalMedia() {
+            if (isCuelistLocked()) return;
+            if (api?.openFileDialog) {
+                try {
+                    const files = await api.openFileDialog();
+                    if (files && files.length > 0) {
+                        files.forEach(f => {
+                            const original = f.name;
+                            const clip = {
+                                name: removeExtension(original),
+                                originalName: original,
+                                url: f.url,
+                                type: f.type,
+                                gain: 1.0,
+                                fadeIn: 0.0,
+                                fadeOut: 0.0,
+                                rotation: 0,
+                                endBehavior: 'hold',
+                                format: extractFormat(original),
+                                codec: extractCodec(original, f.type)
+                            };
+                            loadClipMetadata(clip);
+                            playlist.push(clip);
+                        });
+                        renderPlaylist();
+                        if (stagedIndex === -1 && playlist.length > 0) {
+                            selectClip(0);
+                        }
+                        saveStateToLocalStorage();
+                    }
+                } catch (err) {
+                    appendConsoleLog(`File open error: ${err.message}`);
+                }
+            } else {
+                document.getElementById('browser-media-input').click();
+            }
+        }
+
+        function handleBrowserMediaUpload(e) {
+            const files = e.target.files;
+            if (!files || files.length === 0) return;
+            Array.from(files).forEach(f => {
+                const url = URL.createObjectURL(f);
+                let type = 'video';
+                if (f.type.startsWith('audio/')) type = 'audio';
+                else if (f.type.startsWith('image/')) type = 'image';
+                const original = f.name;
+                const clip = {
+                    name: removeExtension(original),
+                    originalName: original,
+                    url: url,
+                    type: type,
+                    gain: 1.0,
+                    fadeIn: 0.0,
+                    fadeOut: 0.0,
+                    rotation: 0,
+                    endBehavior: 'hold',
+                    format: extractFormat(original),
+                    codec: extractCodec(original, type)
+                };
+                loadClipMetadata(clip);
+                playlist.push(clip);
+            });
+            renderPlaylist();
+            if (stagedIndex === -1 && playlist.length > 0) {
+                selectClip(0);
+            }
+            saveStateToLocalStorage();
+            e.target.value = '';
+        }
+
+        async function saveCuelist() {
+            if (isCuelistLocked()) return;
+            if (playlist.length === 0) {
+                alert("Cuelist is empty.");
+                return;
+            }
+            if (api?.saveCuelistDialog) {
+                const success = await api.saveCuelistDialog(playlist);
+                if (success) {
+                    appendConsoleLog("Cuelist saved successfully.", false);
+                    saveStateToLocalStorage();
+                }
+            } else {
+                const cleanData = playlist.map(c => ({
+                    originalName: c.originalName || c.name,
+                    name: c.name,
+                    url: c.url,
+                    type: c.type,
+                    gain: c.gain,
+                    fadeIn: c.fadeIn,
+                    fadeOut: c.fadeOut,
+                    rotation: c.rotation,
+                    endBehavior: c.endBehavior,
+                    format: c.format,
+                    codec: c.codec
+                }));
+                const blob = new Blob([JSON.stringify(cleanData, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'cuelist.json';
+                a.click();
+                URL.revokeObjectURL(url);
+                appendConsoleLog("Cuelist downloaded as JSON.", false);
+            }
+        }
+
+        async function loadCuelist() {
+            if (isCuelistLocked()) return;
+            if (api?.loadCuelistDialog) {
+                const loaded = await api.loadCuelistDialog();
+                // Re-check: a cue may have gone live while the dialog was open
+                if (isCuelistLocked()) {
+                    appendConsoleLog("LOAD CANCELLED: A CUE WENT LIVE WHILE THE DIALOG WAS OPEN.");
+                    return;
+                }
+                if (loaded && Array.isArray(loaded)) {
+                    processLoadedCuelist(loaded);
+                }
+            } else {
+                document.getElementById('browser-json-input').click();
+            }
+        }
+
+        function handleBrowserJsonUpload(e) {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                try {
+                    const loaded = JSON.parse(event.target.result);
+                    if (Array.isArray(loaded)) {
+                        processLoadedCuelist(loaded);
+                    }
+                } catch (err) {
+                    appendConsoleLog("Failed to parse JSON: " + err.message);
+                }
+            };
+            reader.readAsText(file);
+            e.target.value = '';
+        }
+
+        function processLoadedCuelist(loaded) {
+            playlist = loaded.map(c => {
+                const original = c.originalName || c.name;
+                const clip = {
+                    ...c,
+                    originalName: original,
+                    name: removeExtension(original),
+                    gain: c.gain !== undefined ? c.gain : 1.0,
+                    fadeIn: c.fadeIn !== undefined ? c.fadeIn : 0.0,
+                    fadeOut: c.fadeOut !== undefined ? c.fadeOut : 0.0,
+                    rotation: c.rotation !== undefined ? c.rotation : 0,
+                    endBehavior: c.endBehavior || 'hold',
+                    format: c.format || extractFormat(original),
+                    codec: c.codec || extractCodec(original, c.type)
+                };
+                loadClipMetadata(clip);
+                return clip;
+            });
+            currentIndex = -1;
+            stagedIndex = -1;
+            renderPlaylist();
+            if (playlist.length > 0) selectClip(0);
+            saveStateToLocalStorage();
+            appendConsoleLog(`Loaded cuelist with ${playlist.length} cues.`, false);
+        }
+
+        function selectClip(idx) {
+            if (idx < 0 || idx >= playlist.length) return;
+            stagedIndex = idx;
+            renderPlaylist();
+
+            const clip = playlist[idx];
+            const prevVid = document.getElementById('preview-video');
+            const prevImg = document.getElementById('preview-image');
+            const prevAud = document.getElementById('preview-audio');
+            const placeholder = document.getElementById('preview-placeholder');
+            const cueTitle = document.getElementById('cue-title-text');
+            const cueBadge = document.getElementById('cue-badge');
+
+            if (cueTitle) cueTitle.innerText = `CUE: ${clip.name}`;
+            if (cueBadge) cueBadge.innerText = `CUE #${idx + 1}`;
+            if (placeholder) placeholder.style.display = 'none';
+
+            prevVid.style.display = 'none';
+            prevImg.style.display = 'none';
+            prevAud.pause();
+            prevAud.src = '';
+
+            const rot = clip.rotation || 0;
+
+            if (clip.type === 'image') {
+                prevImg.style.display = 'block';
+                prevImg.style.opacity = '1';
+                prevImg.style.transform = `rotate(${rot}deg)`;
+                prevImg.src = clip.url;
+            } else if (clip.type === 'audio') {
+                if (placeholder) {
+                    placeholder.innerText = `AUDIO CUE: ${clip.name}`;
+                    placeholder.style.display = 'block';
+                }
+            } else {
+                prevVid.style.display = 'block';
+                prevVid.style.opacity = '1';
+                prevVid.style.transform = `rotate(${rot}deg)`;
+                prevVid.src = clip.url;
+                prevVid.currentTime = 0;
+                prevVid.pause();
+            }
+        }
+
+        function scrubProgram(val) {
+            if (currentIndex === -1 || currentProgramDuration <= 0) return;
+            const targetTime = (parseFloat(val) / 100) * currentProgramDuration;
+            sendProgramCommand('seek', targetTime);
+        }
+
+        function jumpToEnd(seconds) {
+            if (currentIndex === -1) return;
+            sendProgramCommand('goto-end', seconds);
+        }
+
+        // PGM audio indicator: an audio cue has no picture, so show an icon + name while it is on PGM
+        function setProgramAudioIndicator(clip) {
+            const ind = document.getElementById('program-audio-indicator');
+            if (!ind) return;
+            if (clip && clip.type === 'audio') {
+                document.getElementById('program-audio-name').innerText = clip.name;
+                ind.classList.remove('paused');
+                ind.querySelector('.audio-indicator-label').innerText = 'AUDIO PLAYING';
+                ind.style.display = 'flex';
+            } else {
+                ind.style.display = 'none';
+            }
+        }
+
+        function setProgramAudioPaused(paused) {
+            const ind = document.getElementById('program-audio-indicator');
+            if (!ind || ind.style.display === 'none') return;
+            ind.classList.toggle('paused', paused);
+            ind.querySelector('.audio-indicator-label').innerText = paused ? 'AUDIO PAUSED' : 'AUDIO PLAYING';
+        }
+
+        // PAUSE freezes any fade on the PGM monitor (picture, and sound when the output is closed);
+        // PLAY carries it on from where it stopped. Seeks undo a fade-out, like output.html.
+        function freezeProgramFades() {
+            const progFade = document.getElementById('program-fade-overlay');
+            if (progFade) {
+                const frozen = getComputedStyle(progFade).opacity;
+                progFade.style.transition = 'none';
+                progFade.style.opacity = frozen;
+            }
+            if (!isOutputWindowOpen) freezeLocalAudio();
+        }
+
+        function resumeProgramFades(clip, el) {
+            const progFade = document.getElementById('program-fade-overlay');
+            if (!clip || !progFade) return;
+            if (programFadeOutStarted) {
+                const timeLeft = Math.max(0.05, (el.duration || currentProgramDuration) - el.currentTime);
+                progFade.style.transition = `opacity ${timeLeft}s linear`;
+                progFade.style.opacity = '1';
+                if (!isOutputWindowOpen) rampLocalAudio(0, timeLeft);
+            } else if ((clip.fadeIn || 0) > 0 && el.currentTime < clip.fadeIn) {
+                const fadeLeft = clip.fadeIn - el.currentTime;
+                progFade.style.transition = `opacity ${fadeLeft}s ease`;
+                progFade.style.opacity = '0';
+                if (!isOutputWindowOpen) rampLocalAudio(1, fadeLeft);
+            }
+        }
+
+        function resetProgramFadeOut() {
+            const progFade = document.getElementById('program-fade-overlay');
+            programFadeOutStarted = false;
+            if (progFade) { progFade.style.transition = 'none'; progFade.style.opacity = '0'; }
+            if (!isOutputWindowOpen) rampLocalAudio(1, 0);
+        }
+
+        function sendProgramCommand(cmd, val) {
+            ipcRenderer.send('program-command', cmd, val);
+            const clip = (currentIndex >= 0) ? playlist[currentIndex] : null;
+            const el = (clip?.type === 'audio') ? document.getElementById('program-audio') : document.getElementById('program-video');
+            if (!el) return;
+
+            if (cmd === 'play') {
+                if (currentProgramDuration > 0 && el.currentTime >= currentProgramDuration - 0.05) {
+                    el.currentTime = 0;
+                    ipcRenderer.send('program-command', 'seek', 0);
+                }
+                el.play().catch(() => {});
+                const holdBadge = document.getElementById('pgm-hold-badge');
+                if (holdBadge) holdBadge.style.display = 'none';
+                setProgramAudioPaused(false);
+                resumeProgramFades(clip, el);
+            } else if (cmd === 'pause') {
+                el.pause();
+                setProgramAudioPaused(true);
+                freezeProgramFades();
+            } else if (cmd === 'seek' || cmd === 'goto-end') {
+                el.currentTime = cmd === 'seek' ? val : Math.max(0, currentProgramDuration - val);
+                resetProgramFadeOut();
+            }
+        }
+
+        function triggerKill() {
+            if (isKilling || currentIndex === -1) return;
+            isKilling = true;
+
+            const progFade = document.getElementById('program-fade-overlay');
+            if (progFade) {
+                progFade.style.transition = 'opacity 1s ease';
+                progFade.style.opacity = '1';
+            }
+            // With the output closed the PGM monitor is the real sound, so fade it out with the picture
+            if (!isOutputWindowOpen) rampLocalAudio(0, 1);
+
+            ipcRenderer.send('trigger-kill');
+
+            if (killTimer) clearTimeout(killTimer);
+            killTimer = setTimeout(() => {
+                executeKill();
+            }, 1000);
+        }
+
+        function executeKill() {
+            if (killTimer) { clearTimeout(killTimer); killTimer = null; }
+            isKilling = false;
+            setProgramAudioIndicator(null);
+
+            const progVid = document.getElementById('program-video');
+            const progImg = document.getElementById('program-image');
+            const progAud = document.getElementById('program-audio');
+            const progFade = document.getElementById('program-fade-overlay');
+            if (progVid) { progVid.pause(); progVid.src = ''; progVid.style.display = 'none'; }
+            if (progImg) { progImg.src = ''; progImg.style.display = 'none'; }
+            if (progAud) { progAud.pause(); progAud.src = ''; }
+            if (progFade) { progFade.style.transition = 'none'; progFade.style.opacity = '0'; }
+
+            const progPlaceholder = document.getElementById('program-placeholder');
+            if (progPlaceholder) {
+                progPlaceholder.innerText = 'NO OUTPUT';
+                progPlaceholder.classList.remove('is-error');
+                progPlaceholder.style.display = 'block';
+            }
+            const pgmTitle = document.getElementById('pgm-title-text');
+            if (pgmTitle) pgmTitle.innerText = 'PGM: NO ACTIVE CLIP';
+            const onAirBadge = document.getElementById('pgm-onair-badge');
+            if (onAirBadge) onAirBadge.style.display = 'none';
+            const holdBadge = document.getElementById('pgm-hold-badge');
+            if (holdBadge) holdBadge.style.display = 'none';
+
+            document.getElementById('prog-elapsed').innerText = '00:00:00';
+            document.getElementById('prog-remaining').innerText = '00:00:00';
+            document.getElementById('prog-scrub').value = 0;
+            updateVuMeter(0);
+
+            if (currentIndex !== -1 && playlist.length > 0) {
+                const nextIdx = (currentIndex + 1) % playlist.length;
+                currentIndex = -1;
+                renderPlaylist();
+                selectClip(nextIdx);
+            } else {
+                currentIndex = -1;
+                renderPlaylist();
+            }
+        }
+
+        // main.js echoes 'execute-kill' back the instant a KILL is sent. If this window started the KILL,
+        // a 1s fade is already running and killTimer will finish it (in step with the output's own 1s
+        // fade), so ignore the echo instead of cutting the PGM monitor straight to black.
+        ipcRenderer.on('execute-kill', () => {
+            if (isKilling) return;
+            executeKill();
+        });
+
+        function executeTake() {
+            // Refuse to put a cue on air whose file already failed to load; re-probe it so a
+            // restored file can be taken on the next press. Checked before touching kill state.
+            const takeIdx = (stagedIndex === -1 && playlist.length > 0) ? 0 : stagedIndex;
+            const takeClip = playlist[takeIdx];
+            if (takeClip && takeClip.mediaError) {
+                appendConsoleLog(`TAKE BLOCKED: CUE ${String(takeIdx + 1).padStart(2, '0')} "${takeClip.name}" - ${takeClip.mediaError}. RECHECKING FILE...`);
+                loadClipMetadata(takeClip);
+                return;
+            }
+
+            if (isKilling) {
+                if (killTimer) { clearTimeout(killTimer); killTimer = null; }
+                isKilling = false;
+            }
+
+            if (stagedIndex === -1 && playlist.length > 0) {
+                stagedIndex = 0;
+            }
+            if (stagedIndex === -1 || stagedIndex >= playlist.length) return;
+
+            const prevVid = document.getElementById('preview-video');
+            const prevAud = document.getElementById('preview-audio');
+            const prevImg = document.getElementById('preview-image');
+            if (prevVid) { prevVid.pause(); prevVid.src = ''; prevVid.style.display = 'none'; }
+            if (prevAud) { prevAud.pause(); prevAud.src = ''; }
+            if (prevImg) { prevImg.src = ''; prevImg.style.display = 'none'; }
+
+            currentIndex = stagedIndex;
+            const clip = playlist[currentIndex];
+
+            // Setup Program Monitor Mirror
+            const progVid = document.getElementById('program-video');
+            const progImg = document.getElementById('program-image');
+            const progAud = document.getElementById('program-audio');
+            const progFade = document.getElementById('program-fade-overlay');
+            const placeholder = document.getElementById('program-placeholder');
+            const pgmTitle = document.getElementById('pgm-title-text');
+            const onAirBadge = document.getElementById('pgm-onair-badge');
+            const holdBadge = document.getElementById('pgm-hold-badge');
+
+            if (placeholder) placeholder.style.display = 'none';
+            if (pgmTitle) pgmTitle.innerText = `PGM: ${clip.name}`;
+            if (onAirBadge) onAirBadge.style.display = 'inline-block';
+            if (holdBadge) holdBadge.style.display = 'none';
+
+            progVid.style.display = 'none';
+            progImg.style.display = 'none';
+            progAud.pause();
+            progAud.src = '';
+
+            if (!isOutputWindowOpen) initLocalMeter();
+            // Full level again (cancels any KILL fade still in progress), or rise from silence on fade-in
+            if ((clip.fadeIn || 0) > 0 && clip.type !== 'image') {
+                rampLocalAudio(0, 0);
+                rampLocalAudio(1, clip.fadeIn, 0);
+            } else {
+                rampLocalAudio(1, 0);
+            }
+            setProgramAudioIndicator(clip);
+
+            const rot = clip.rotation || 0;
+            currentProgramDuration = clip.duration || 0;
+            programFadeOutStarted = false;
+
+            if (clip.type === 'image') {
+                progImg.style.display = 'block';
+                progImg.style.opacity = '1';
+                progImg.style.transform = `rotate(${rot}deg)`;
+                progImg.src = clip.url;
+                currentProgramDuration = 0;
+                document.getElementById('prog-elapsed').innerText = '--:--:--';
+                document.getElementById('prog-remaining').innerText = '--:--:--';
+            } else if (clip.type === 'audio') {
+                progAud.src = clip.url;
+                progAud.volume = isOutputWindowOpen ? 0 : Math.min(1.0, clip.gain || 1.0);
+                progAud.loop = (clip.endBehavior === 'loop');
+                if (!isOutputWindowOpen) progAud.play().catch(() => {});
+            } else {
+                progVid.style.display = 'block';
+                progVid.style.opacity = '1';
+                progVid.style.transform = `rotate(${rot}deg)`;
+                progVid.src = clip.url;
+                progVid.muted = isOutputWindowOpen;
+                progVid.loop = (clip.endBehavior === 'loop');
+                progVid.play().catch(() => {});
+            }
+
+            // Visual Fade-in
+            const fadeIn = clip.fadeIn || 0;
+            if (fadeIn > 0 && progFade) {
+                progFade.style.transition = 'none';
+                progFade.style.opacity = '1';
+                setTimeout(() => {
+                    progFade.style.transition = `opacity ${fadeIn}s ease`;
+                    progFade.style.opacity = '0';
+                }, 50);
+            } else if (progFade) {
+                progFade.style.transition = 'none';
+                progFade.style.opacity = '0';
+            }
+
+            ipcRenderer.send('cue-video', clip);
+
+            // Auto stage next cue
+            if (playlist.length > 1) {
+                stagedIndex = (currentIndex + 1) % playlist.length;
+                selectClip(stagedIndex);
+            } else {
+                stagedIndex = -1;
+                renderPlaylist();
+                const prevPlaceholder = document.getElementById('preview-placeholder');
+                if (prevPlaceholder) {
+                    prevPlaceholder.innerText = "NO CLIP";
+                    prevPlaceholder.style.display = 'block';
+                }
+                const cueTitleEl = document.getElementById('cue-title-text');
+                if (cueTitleEl) cueTitleEl.innerText = "CUE";
+                const cueBadgeEl = document.getElementById('cue-badge');
+                if (cueBadgeEl) cueBadgeEl.innerText = "STANDBY";
+            }
+        }
+
+        // A program clip failed (reported by the output window, or by the local program monitor
+        // when the output window is closed): mark the cue, log it, and reset PGM to black.
+        function handleProgramMediaError(url, message) {
+            let cueLabel = '';
+            playlist.forEach((c, i) => {
+                if (c.url === url) {
+                    c.mediaError = message;
+                    if (!cueLabel) cueLabel = `CUE ${String(i + 1).padStart(2, '0')} "${c.name}"`;
+                }
+            });
+            appendConsoleLog(`MEDIA ERROR ${cueLabel || url}: ${message}. OUTPUT CUT TO BLACK.`);
+
+            const live = playlist[currentIndex];
+            if (live && live.url === url) {
+                executeKill();
+                const progPlaceholder = document.getElementById('program-placeholder');
+                if (progPlaceholder) {
+                    progPlaceholder.innerText = 'MEDIA ERROR - OUTPUT BLACK';
+                    progPlaceholder.classList.add('is-error');
+                }
+            } else {
+                renderPlaylist();
+            }
+        }
+
+        ipcRenderer.on('program-media-error', (event, info) => {
+            if (info && info.url) handleProgramMediaError(info.url, info.message);
+        });
+
+        // Local program monitor errors only matter when it is the real output (output window closed).
+        // Clearing src on TAKE/KILL also fires 'error', so require a real MediaError on the live clip's URL.
+        ['program-video', 'program-audio'].forEach(id => {
+            const el = document.getElementById(id);
+            el.addEventListener('error', () => {
+                if (isOutputWindowOpen || !el.error) return;
+                const live = playlist[currentIndex];
+                if (!live || el.getAttribute('src') !== live.url) return;
+                handleProgramMediaError(live.url, 'FILE MISSING OR UNREADABLE');
+            });
+        });
+        const localProgImg = document.getElementById('program-image');
+        localProgImg.addEventListener('error', () => {
+            if (isOutputWindowOpen) return;
+            const live = playlist[currentIndex];
+            if (!live || live.type !== 'image' || localProgImg.getAttribute('src') !== live.url) return;
+            if (!localProgImg.complete || localProgImg.naturalWidth > 0) return;
+            handleProgramMediaError(live.url, 'IMAGE MISSING OR UNREADABLE');
+        });
+
+        // Shared timecode updater (from secondary output or local program)
+        ipcRenderer.on('program-timeupdate', (event, cur, dur) => {
+            handleTimeUpdate(cur, dur);
+        });
+
+        const localProgVid = document.getElementById('program-video');
+        localProgVid.addEventListener('timeupdate', () => {
+            if (!isOutputWindowOpen) {
+                handleTimeUpdate(localProgVid.currentTime, localProgVid.duration || currentProgramDuration);
+            }
+        });
+
+        function handleTimeUpdate(cur, dur) {
+            if (currentIndex === -1 || isKilling) return;
+            const clip = playlist[currentIndex];
+            if (!clip || clip.type === 'image') return;
+
+            currentProgramDuration = dur || currentProgramDuration;
+
+            // HOLD behavior check
+            if (clip.endBehavior === 'hold' && currentProgramDuration > 0 && cur >= currentProgramDuration - 0.08) {
+                document.getElementById('prog-elapsed').innerText = formatTimecode(currentProgramDuration);
+                document.getElementById('prog-remaining').innerText = '00:00:00';
+                document.getElementById('prog-scrub').value = 100;
+                const holdBadge = document.getElementById('pgm-hold-badge');
+                if (holdBadge) holdBadge.style.display = 'inline-block';
+                updateVuMeter(0);
+                return;
+            }
+
+            document.getElementById('prog-elapsed').innerText = formatTimecode(cur);
+            const remaining = Math.max(0, currentProgramDuration - cur);
+            document.getElementById('prog-remaining').innerText = formatTimecode(remaining);
+
+            if (currentProgramDuration > 0) {
+                document.getElementById('prog-scrub').value = (cur / currentProgramDuration) * 100;
+            }
+
+            // Fade-out handling, matching output.html: picture and (output closed) sound fade over the
+            // time left. A loop wrap or backwards seek undoes a fade-out that has started.
+            const progFade = document.getElementById('program-fade-overlay');
+            if (programFadeOutStarted && cur < lastProgramTime - 0.5 && progFade) {
+                programFadeOutStarted = false;
+                progFade.style.transition = 'none';
+                progFade.style.opacity = '0';
+                if (!isOutputWindowOpen) rampLocalAudio(1, 0);
+            }
+            if (clip.fadeOut > 0 && currentProgramDuration > 0) {
+                const timeLeft = currentProgramDuration - cur;
+                if (timeLeft <= clip.fadeOut && !programFadeOutStarted && progFade) {
+                    programFadeOutStarted = true;
+                    progFade.style.transition = `opacity ${Math.max(0.05, timeLeft)}s linear`;
+                    progFade.style.opacity = '1';
+                    if (!isOutputWindowOpen) rampLocalAudio(0, Math.max(0.05, timeLeft));
+                }
+            }
+            lastProgramTime = cur;
+        }
+
+        ipcRenderer.on('auto-advance-next', () => {
+            const nextIdx = currentIndex + 1;
+            if (nextIdx < playlist.length) {
+                selectClip(nextIdx);
+                executeTake();
+            } else {
+                const lastClip = playlist[playlist.length - 1];
+                if (lastClip && lastClip.endBehavior === 'advance') {
+                    selectClip(0);
+                    executeTake();
+                } else {
+                    executeKill();
+                }
+            }
+        });
+
+        // Autoload persistence
+        async function autoloadLastCuelist() {
+            try {
+                // Try Electron IPC first
+                let loaded = await ipcRenderer.invoke('load-last-cuelist');
+                // Fallback to localStorage
+                if (!loaded || !Array.isArray(loaded) || loaded.length === 0) {
+                    const saved = localStorage.getItem('playback-joe-last-cuelist');
+                    if (saved) loaded = JSON.parse(saved);
+                }
+
+                if (loaded && Array.isArray(loaded) && loaded.length > 0) {
+                    playlist = loaded.map(c => {
+                        const original = c.originalName || c.name;
+                        const clip = {
+                            ...c,
+                            originalName: original,
+                            name: removeExtension(original),
+                            gain: c.gain !== undefined ? c.gain : 1.0,
+                            fadeIn: c.fadeIn !== undefined ? c.fadeIn : 0.0,
+                            fadeOut: c.fadeOut !== undefined ? c.fadeOut : 0.0,
+                            rotation: c.rotation !== undefined ? c.rotation : 0,
+                            endBehavior: c.endBehavior || 'hold',
+                            format: c.format || extractFormat(original),
+                            codec: c.codec || extractCodec(original, c.type)
+                        };
+                        loadClipMetadata(clip);
+                        return clip;
+                    });
+                    currentIndex = -1;
+                    stagedIndex = -1;
+                    renderPlaylist();
+                    selectClip(0);
+                    appendConsoleLog(`[AUTOLOAD] Restored ${playlist.length} cues from last session.`, false);
+                }
+            } catch (err) {
+                appendConsoleLog(`[AUTOLOAD] Cuelist initialized fresh.`);
+            }
+        }
+
+        window.addEventListener('beforeunload', () => {
+            saveStateToLocalStorage();
+        });
+
+        window.addEventListener('blur', () => {
+            document.getElementById('focus-overlay').style.display = 'flex';
+        });
+
+        window.addEventListener('focus', () => {
+            document.getElementById('focus-overlay').style.display = 'none';
+        });
+
+        window.addEventListener('keydown', (e) => {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+            
+            if (e.code === 'ArrowDown') {
+                e.preventDefault();
+                if (playlist.length > 0) {
+                    stagedIndex = Math.min(stagedIndex + 1, playlist.length - 1);
+                    selectClip(stagedIndex);
+                }
+            } else if (e.code === 'ArrowUp') {
+                e.preventDefault();
+                if (playlist.length > 0) {
+                    stagedIndex = Math.max(stagedIndex - 1, 0);
+                    selectClip(stagedIndex);
+                }
+            } else if (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Space') {
+                e.preventDefault();
+                executeTake();
+            } else if (e.code === 'Escape' || e.code === 'Backspace') {
+                e.preventDefault();
+                triggerKill();
+            }
+        });
+
+        autoloadLastCuelist();
+    </script>
+</body>
+</html>

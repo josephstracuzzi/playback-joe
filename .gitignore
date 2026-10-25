@@ -1,0 +1,15 @@
+# Dependencies (recreated with `npm install`)
+node_modules/
+
+# Build output (recreated with `npm run build:*`)
+dist/
+
+# Logs and OS clutter
+*.log
+npm-debug.log*
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Personal Claude Code settings (the shared .claude/settings.json is kept)
+.claude/settings.local.json
