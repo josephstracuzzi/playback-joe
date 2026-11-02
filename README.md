@@ -49,6 +49,7 @@ Your settings, your autosaved cuelist and the starter clips are kept in your app
 - Switch **OUTPUT** off in the middle of a cue and the operator's PGM monitor takes over the picture and sound where the output left off. Switch it back on and the output picks the cue up again. OUTPUT on/off is remembered for the next launch.
 - Only one copy of the app runs at a time, so a double-click can't open a second set of windows.
 - A built-in **CONSOLE** shows a log of what happened.
+- **SIZE** makes the operator console **SMALL**, **DEFAULT** or **LARGE**. The output is never affected. The size is saved with the autosave and with exported cuelists, so it comes back at the next launch or IMPORT.
 
 ### Keyboard shortcuts
 | Key | Action |

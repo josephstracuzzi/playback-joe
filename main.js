@@ -49,7 +49,7 @@ try {
 }
 
 // App settings that outlast a session (OUTPUT on/off), kept next to the cuelist autosave in
-// userData/settings.json. A separate file, so last-cuelist.json stays a plain list of cues.
+// userData/settings.json.
 const settingsPath = path.join(app.getPath('userData'), 'settings.json');
 
 function loadSettings() {
@@ -69,6 +69,48 @@ function saveSettings(changes) {
         fs.renameSync(tmpPath, settingsPath);
     } catch (err) {
         console.error('Failed to save settings:', err);
+    }
+}
+
+// Operator interface size (SIZE button). The output window is never scaled. The level is stored
+// with the cues in the autosave and in exported cuelists: { uiScale, cues }.
+const UI_SCALES = { 1: 0.85, 2: 1, 3: 1.15 };
+let uiScaleLevel = 2;
+
+function isUiScale(level) {
+    return [1, 2, 3].includes(level);
+}
+
+function readSavedUiScale() {
+    try {
+        const level = JSON.parse(fs.readFileSync(cuelistSavePath, 'utf-8')).uiScale;
+        return isUiScale(level) ? level : 2;
+    } catch (err) {
+        return 2;
+    }
+}
+
+// Cue rows keep one height: titles truncate (min ~30 chars), format/codec/resolution tags drop out,
+// runtime always stays. Below ~1080 wide the fade row would overflow; 1100 leaves room for "LOADING...".
+// The minimum window scales with the interface, so the page always has at least 1100x900 to lay out in.
+function applyUiScale(level) {
+    const zoom = UI_SCALES[level];
+    mainWindow.webContents.setZoomFactor(zoom);
+    const bounds = mainWindow.getBounds();
+    const { workArea } = screen.getDisplayMatching(bounds);
+    const minWidth = Math.min(Math.round(1100 * zoom), workArea.width);
+    const minHeight = Math.min(Math.round(900 * zoom), workArea.height);
+    mainWindow.setMinimumSize(minWidth, minHeight);
+    if (mainWindow.isMaximized() || mainWindow.isFullScreen()) return;
+    if (bounds.width < minWidth || bounds.height < minHeight) {
+        const width = Math.max(bounds.width, minWidth);
+        const height = Math.max(bounds.height, minHeight);
+        mainWindow.setBounds({
+            x: Math.max(workArea.x, Math.min(bounds.x, workArea.x + workArea.width - width)),
+            y: Math.max(workArea.y, Math.min(bounds.y, workArea.y + workArea.height - height)),
+            width,
+            height
+        });
     }
 }
 
@@ -298,6 +340,7 @@ function createWindow() {
     if (loadSettings().outputOpen !== false) createOutputWindow();
     watchDisplays();
 
+    uiScaleLevel = readSavedUiScale();
     mainWindow = new BrowserWindow({
         title: 'PLAYBACK JOE ' + app.getVersion() + ' - OPERATOR',
         icon: APP_ICON,
@@ -306,13 +349,10 @@ function createWindow() {
             nodeIntegration: false,
             contextIsolation: true,
             sandbox: true,
+            zoomFactor: UI_SCALES[uiScaleLevel],
             preload: path.join(__dirname, 'preload.js')
         }
     });
-
-    // Cue rows keep one height: titles truncate (min ~30 chars), format/codec/resolution tags drop out,
-    // runtime always stays. Below ~1080 wide the fade row would overflow; 1100 leaves room for "LOADING...".
-    mainWindow.setMinimumSize(1100, 900);
 
     // Operator console starts in the top-left corner of the primary display (above the taskbar)
     const workArea = primaryDisplay.workArea;
@@ -322,10 +362,15 @@ function createWindow() {
         width: Math.min(1350, workArea.width),
         height: Math.min(980, workArea.height)
     });
+    applyUiScale(uiScaleLevel);
 
     mainWindow.loadFile(path.join(__dirname, 'index.html'));
     // Tell the operator whether the output is open (it may have started switched off)
-    mainWindow.webContents.on('did-finish-load', () => sendOutputStatus(outputWindow));
+    mainWindow.webContents.on('did-finish-load', () => {
+        sendOutputStatus(outputWindow);
+        // Chromium can bring back an older zoom on load, so the saved scale is set again here
+        mainWindow.webContents.setZoomFactor(UI_SCALES[uiScaleLevel]);
+    });
 
     mainWindow.on('closed', () => {
         mainWindow = null;
@@ -447,6 +492,22 @@ function cueForSaving(c) {
     return cue;
 }
 
+// Cuelist files before 10.27.3 are a plain list of cues
+function cuesInFile(data) {
+    return Array.isArray(data) ? data : data?.cues;
+}
+
+function cuelistFileText(cues) {
+    return JSON.stringify({ uiScale: uiScaleLevel, cues }, null, 2);
+}
+
+// Write to a temp file then rename, so a crash or power cut mid-write can't corrupt the autosave
+function writeAutosave(cues) {
+    const tmpPath = cuelistSavePath + '.tmp';
+    fs.writeFileSync(tmpPath, cuelistFileText(cues), 'utf-8');
+    fs.renameSync(tmpPath, cuelistSavePath);
+}
+
 // Cues read from a file: anything refused is reported in the operator's console
 function cleanLoadedCuelist(data, label) {
     if (!Array.isArray(data)) {
@@ -472,6 +533,21 @@ function fromOutput(event) {
 // ============================================================================
 
 ipcMain.handle('get-app-version', () => app.getVersion());
+ipcMain.handle('get-ui-scale', () => uiScaleLevel);
+
+ipcMain.on('set-ui-scale', (event, level) => {
+    if (!fromOperator(event) || !isUiScale(level)) return;
+    uiScaleLevel = level;
+    applyUiScale(level);
+    // Rewrites the autosave's own cues, as the operator's list may not have loaded yet
+    try {
+        if (!fs.existsSync(cuelistSavePath)) return;
+        const cues = cuesInFile(JSON.parse(fs.readFileSync(cuelistSavePath, 'utf-8')));
+        if (Array.isArray(cues)) writeAutosave(cues);
+    } catch (err) {
+        console.error('Failed to save the interface size:', err);
+    }
+});
 
 ipcMain.on('toggle-output-window', (event, opts) => {
     if (!fromOperator(event)) return;
@@ -681,7 +757,7 @@ ipcMain.handle('dialog:saveCuelist', async (event, cuelist) => {
 
     try {
         const cleanData = cuelist.map(cueForSaving).filter(Boolean);
-        fs.writeFileSync(result.filePath, JSON.stringify(cleanData, null, 2), 'utf-8');
+        fs.writeFileSync(result.filePath, cuelistFileText(cleanData), 'utf-8');
         return true;
     } catch (err) {
         console.error('Failed to export cuelist:', err);
@@ -699,8 +775,9 @@ ipcMain.handle('dialog:loadCuelist', async () => {
     if (result.canceled || result.filePaths.length === 0) return null;
 
     try {
-        const data = fs.readFileSync(result.filePaths[0], 'utf-8');
-        return cleanLoadedCuelist(JSON.parse(data), 'IMPORT');
+        const data = JSON.parse(fs.readFileSync(result.filePaths[0], 'utf-8'));
+        const cues = cleanLoadedCuelist(cuesInFile(data), 'IMPORT');
+        return cues && { cues, uiScale: isUiScale(data.uiScale) ? data.uiScale : null };
     } catch (err) {
         console.error('Failed to import cuelist:', err);
         notifyOperator('IMPORT: THAT FILE COULD NOT BE READ AS A CUELIST.');
@@ -711,11 +788,7 @@ ipcMain.handle('dialog:loadCuelist', async () => {
 ipcMain.on('save-last-cuelist', (event, cuelist) => {
     if (!fromOperator(event) || !Array.isArray(cuelist)) return;
     try {
-        const cleanData = cuelist.map(cueForSaving).filter(Boolean);
-        // Write to a temp file then rename, so a crash or power cut mid-write can't corrupt the autosave
-        const tmpPath = cuelistSavePath + '.tmp';
-        fs.writeFileSync(tmpPath, JSON.stringify(cleanData, null, 2), 'utf-8');
-        fs.renameSync(tmpPath, cuelistSavePath);
+        writeAutosave(cuelist.map(cueForSaving).filter(Boolean));
     } catch (err) {
         console.error('Failed to autosave cuelist:', err);
     }
@@ -826,7 +899,7 @@ ipcMain.handle('load-last-cuelist', () => {
     try {
         if (fs.existsSync(cuelistSavePath)) {
             const data = fs.readFileSync(cuelistSavePath, 'utf-8');
-            return cleanLoadedCuelist(JSON.parse(data), 'AUTOSAVE');
+            return cleanLoadedCuelist(cuesInFile(JSON.parse(data)), 'AUTOSAVE');
         }
         // No autosave at all means a clean install: start with the bundled test clips.
         // A cleared cuelist still autosaves as [], so it stays blank on the next launch.

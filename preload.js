@@ -8,6 +8,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('playbackAPI', {
     // The one version number (package.json), for titles and the header badge
     getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+    getUiScale: () => ipcRenderer.invoke('get-ui-scale'),
+    setUiScale: (level) => ipcRenderer.send('set-ui-scale', level),
 
     // Window Controls
     toggleOutputWindow: (opts) => ipcRenderer.send('toggle-output-window', opts),

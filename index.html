@@ -546,6 +546,7 @@
             <div></div>
             <div class="header-right">
                 <div class="header-actions">
+                    <button class="btn-fs-top pick-anchor" id="btn-ui-scale" onclick="openUiScaleMenu(this); this.blur();" title="INTERFACE SIZE (OPERATOR WINDOW ONLY)">SIZE</button>
                     <button class="btn-fs-top" id="btn-console" onclick="toggleErrorConsole(); this.blur();">CONSOLE</button>
                     <button class="btn-fs-top output-active" id="btn-output-toggle" onclick="toggleOutputWindow(); this.blur();">OUTPUT</button>
                     <button class="btn-fs-top fullscreen-active" id="btn-fullscreen-toggle" onclick="toggleFullscreen(); this.blur();">⛶ &nbsp; FULLSCREEN</button>
@@ -1465,6 +1466,17 @@
             openPickMenu(anchor, [['grid', 'GRID'], ['sync', 'SYNC TEST'], ['generator', 'GENERATOR']], null, addTestPattern);
         }
 
+        let uiScale = 2;
+
+        function openUiScaleMenu(anchor) {
+            openPickMenu(anchor, [[1, 'SMALL'], [2, 'DEFAULT'], [3, 'LARGE']], uiScale, level => {
+                uiScale = level;
+                api.setUiScale?.(level);
+                // A fresh install has no autosave file for main to update yet
+                if (playlist.length) saveStateToLocalStorage();
+            });
+        }
+
         function patternSizeLabel(clip) {
             return `${clip.pattern.width}X${clip.pattern.height}`;
         }
@@ -2184,8 +2196,12 @@
                     appendConsoleLog("IMPORT CANCELLED: A CUE WENT LIVE WHILE THE DIALOG WAS OPEN.");
                     return;
                 }
-                if (loaded && Array.isArray(loaded)) {
-                    processLoadedCuelist(loaded);
+                if (loaded && Array.isArray(loaded.cues)) {
+                    if (loaded.uiScale) {
+                        uiScale = loaded.uiScale;
+                        api.setUiScale?.(loaded.uiScale);
+                    }
+                    processLoadedCuelist(loaded.cues);
                 }
             } else {
                 document.getElementById('browser-json-input').click();
@@ -3137,6 +3153,7 @@
         });
 
         // The version shown everywhere comes from package.json (through the main process)
+        api?.getUiScale?.().then(level => { uiScale = level; });
         api?.getAppVersion?.().then(version => {
             document.title = `PLAYBACK JOE ${version} - OPERATOR`;
             document.querySelectorAll('[data-app-version]').forEach(el => { el.textContent = `v${version}`; });
