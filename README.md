@@ -43,6 +43,8 @@ Your settings, your autosaved cuelist and the starter clips are kept in your app
 - **Frame-accurate IN / OUT points per cue**: step to a frame with ◀| |▶ and press **IN** or **OUT**. The cue then starts at IN and ends at OUT, and its fades, HOLD, ADV and LOOP all follow the points.
 - Large **elapsed and remaining timecode** and an audio level meter.
 
+<img src="docs/feature-in-out.png" width="467" alt="Timecode panel with IN at 00:00:08, OUT at 00:00:45, and a blue strip under the scrub bar marking the range">
+
 ### Built for live use
 - If a media file is missing or won't play, the output cuts to black, the cue turns red and the problem is logged, instead of the show freezing.
 - If the output window crashes or hangs, it is replaced automatically.
@@ -50,6 +52,8 @@ Your settings, your autosaved cuelist and the starter clips are kept in your app
 - Only one copy of the app runs at a time, so a double-click can't open a second set of windows.
 - A built-in **CONSOLE** shows a log of what happened.
 - **SIZE** makes the operator console **SMALL**, **DEFAULT** or **LARGE**. The output is never affected. The size is saved with the autosave and with exported cuelists, so it comes back at the next launch or IMPORT.
+
+<img src="docs/feature-size.png" width="342" alt="SIZE list open with SMALL, DEFAULT and LARGE, next to the CONSOLE, OUTPUT and FULLSCREEN buttons">
 
 ### Keyboard shortcuts
 | Key | Action |
@@ -62,8 +66,12 @@ Your settings, your autosaved cuelist and the starter clips are kept in your app
 ### PDF slides
 Add a **PDF** with ADD MEDIA and it becomes one cue. Pick a page from its dropdown, or step with **◀ PREV** and **NEXT ▶**, or press **-** and **+** (main keyboard or numpad) while it's live. Pages cut instantly on the output. For a PowerPoint deck, export it as a PDF first. Animations, transitions and embedded video don't carry over.
 
+<img src="docs/feature-pdf-cue.png" width="738" alt="A PDF cue on page 3 of 6, with its page list open and PREV and NEXT buttons beside it">
+
 ### Test patterns
 The **PATTERN** list next to CLEAR adds a test cue to the cuelist: the bundled **Grid** or **Sync Test**, or a **Generator** cue. A generator cue is a normal cue with its own pattern and size pickers: grid, colour bars, greyscale, checkerboard or a solid colour, from 720p to 4K.
+
+<img src="docs/feature-test-patterns.png" width="738" alt="A generator cue with its pattern list open, showing grid, colour bars, greyscale, checkerboard and solid colours">
 
 ### Starter clips
 A fresh install opens with two test clips made for Playback Joe:
