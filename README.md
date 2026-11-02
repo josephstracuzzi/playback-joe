@@ -57,6 +57,9 @@ Your settings, your autosaved cuelist and the starter clips are kept in your app
 | **Enter**, **Numpad Enter** or **Space** | TAKE |
 | **Esc** or **Backspace** | KILL |
 
+### Test patterns
+The **PATTERN** list next to CLEAR adds a test cue to the cuelist: the bundled **Grid** or **Sync Test**, or a **Generator** cue. A generator cue is a normal cue with its own pattern and size pickers: grid, colour bars, greyscale, checkerboard or a solid colour, from 720p to 4K.
+
 ### Starter clips
 A fresh install opens with two test clips made for Playback Joe:
 - **Grid - Playback Joe - 1920x1080**: a projector alignment grid with labelled rows and columns, centre cross and circles.

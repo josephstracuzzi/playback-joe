@@ -33,6 +33,8 @@ contextBridge.exposeInMainWorld('playbackAPI', {
     loadCuelistDialog: () => ipcRenderer.invoke('dialog:loadCuelist'),
     saveLastCuelist: (cuelist) => ipcRenderer.send('save-last-cuelist', cuelist),
     loadLastCuelist: () => ipcRenderer.invoke('load-last-cuelist'),
+    getStarterCues: () => ipcRenderer.invoke('get-starter-cues'),
+    getPatternLogo: () => ipcRenderer.invoke('get-pattern-logo'),
 
     // Event Listeners (Incoming from Main Process)
     onOutputWindowStatus: (callback) => {

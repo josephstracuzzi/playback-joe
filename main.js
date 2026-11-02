@@ -384,13 +384,32 @@ function cuePoints(c) {
     return points;
 }
 
+// A generated test pattern is an image cue with a `pattern` recipe. Its picture is a PNG the operator
+// drew (a data: URL), never saved: the recipe is, and the picture is drawn again on load.
+const PATTERN_KINDS = ['grid', 'bars', 'greyscale', 'checker', 'white', 'grey', 'red', 'green', 'blue'];
+const MAX_PATTERN_URL_LENGTH = 30000000;
+
+function cleanPattern(p) {
+    if (!p || typeof p !== 'object' || !PATTERN_KINDS.includes(p.kind)) return null;
+    if (!Number.isInteger(p.width) || !Number.isInteger(p.height)) return null;
+    if (p.width < 16 || p.width > 7680 || p.height < 16 || p.height > 4320) return null;
+    return { kind: p.kind, width: p.width, height: p.height };
+}
+
+function isPatternPicture(url) {
+    return typeof url === 'string' && url.startsWith('data:image/png;base64,') && url.length <= MAX_PATTERN_URL_LENGTH;
+}
+
 function cleanCue(c) {
     if (!c || typeof c !== 'object') return null;
     const originalName = c.originalName || c.name;
-    if (typeof originalName !== 'string' || !isLocalFileUrl(c.url) || !CUE_TYPES.includes(c.type)) return null;
+    const pattern = c.type === 'image' ? cleanPattern(c.pattern) : null;
+    if (typeof originalName !== 'string' || !CUE_TYPES.includes(c.type)) return null;
+    if (!pattern && !isLocalFileUrl(c.url)) return null;
     return {
         originalName: originalName.slice(0, 512),
-        url: c.url,
+        url: pattern ? (isPatternPicture(c.url) ? c.url : '') : c.url,
+        ...(pattern ? { pattern } : {}),
         type: c.type,
         gain: numberInRange(c.gain, 0, 3, 1.0),
         fadeIn: numberInRange(c.fadeIn, 0, 5, 0.0),
@@ -401,6 +420,13 @@ function cleanCue(c) {
         format: typeof c.format === 'string' ? c.format.slice(0, 40) : undefined,
         codec: typeof c.codec === 'string' ? c.codec.slice(0, 40) : undefined
     };
+}
+
+// What goes into a cuelist file: a pattern keeps its recipe, not its picture
+function cueForSaving(c) {
+    const cue = cleanCue(c);
+    if (cue && cue.pattern) cue.url = '';
+    return cue;
 }
 
 // Cues read from a file: anything refused is reported in the operator's console
@@ -482,7 +508,7 @@ ipcMain.on('toggle-fullscreen', (event) => {
 ipcMain.on('cue-video', (event, clip) => {
     if (!fromOperator(event)) return;
     const cue = cleanCue(clip);
-    if (!cue) {
+    if (!cue || !cue.url) {
         notifyOperator('TAKE REFUSED BY THE OUTPUT: NOT A VALID CUE OR NOT A LOCAL MEDIA FILE.');
         return;
     }
@@ -498,7 +524,7 @@ ipcMain.on('cue-video', (event, clip) => {
 ipcMain.on('resume-output', (event, state) => {
     if (!fromOperator(event) || !state) return;
     const cue = cleanCue(state.clip);
-    if (!cue || !(Number.isFinite(state.position) && state.position >= 0)) return;
+    if (!cue || !cue.url || !(Number.isFinite(state.position) && state.position >= 0)) return;
     if (outputWindow && !outputWindow.isDestroyed()) {
         outputWindow.webContents.send('resume-video', {
             clip: cue,
@@ -628,7 +654,7 @@ ipcMain.handle('dialog:saveCuelist', async (event, cuelist) => {
     if (result.canceled || !result.filePath) return false;
 
     try {
-        const cleanData = cuelist.map(cleanCue).filter(Boolean);
+        const cleanData = cuelist.map(cueForSaving).filter(Boolean);
         fs.writeFileSync(result.filePath, JSON.stringify(cleanData, null, 2), 'utf-8');
         return true;
     } catch (err) {
@@ -659,7 +685,7 @@ ipcMain.handle('dialog:loadCuelist', async () => {
 ipcMain.on('save-last-cuelist', (event, cuelist) => {
     if (!fromOperator(event) || !Array.isArray(cuelist)) return;
     try {
-        const cleanData = cuelist.map(cleanCue).filter(Boolean);
+        const cleanData = cuelist.map(cueForSaving).filter(Boolean);
         // Write to a temp file then rename, so a crash or power cut mid-write can't corrupt the autosave
         const tmpPath = cuelistSavePath + '.tmp';
         fs.writeFileSync(tmpPath, JSON.stringify(cleanData, null, 2), 'utf-8');
@@ -723,12 +749,39 @@ function loadStarterCues() {
                 rotation: 0,
                 endBehavior: 'hold'
             }));
-        return cues.length > 0 ? cues : null;
+        if (cues.length === 0) return null;
+        // A generator cue preset to colour bars; the operator draws its picture from the recipe on load
+        cues.push({
+            originalName: 'GENERATOR - COLOUR BARS.png',
+            url: '',
+            type: 'image',
+            pattern: { kind: 'bars', width: 1920, height: 1080 },
+            gain: 1.0,
+            fadeIn: 0.0,
+            fadeOut: 0.0,
+            rotation: 0,
+            endBehavior: 'hold'
+        });
+        return cues;
     } catch (err) {
         console.error('Failed to load starter cues:', err);
         return null;
     }
 }
+
+// The bundled Grid and Sync Test, for the TEST PATTERNS list
+ipcMain.handle('get-starter-cues', () => loadStarterCues() || []);
+
+// The logo for generated patterns (grid-logo.png, rendered from logo.svg by tools/render-svg.js, so the
+// app needs no font for it)
+ipcMain.handle('get-pattern-logo', () => {
+    try {
+        return 'data:image/png;base64,' + fs.readFileSync(path.join(__dirname, 'grid-logo.png')).toString('base64');
+    } catch (err) {
+        console.error('Failed to read the pattern logo:', err);
+        return null;
+    }
+});
 
 ipcMain.handle('load-last-cuelist', () => {
     try {

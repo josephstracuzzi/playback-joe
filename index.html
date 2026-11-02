@@ -59,12 +59,25 @@
         @media (max-width: 1250px) {
             .header-actions { gap: 4px; }
             .header-actions button { padding: 6px 7px; }
+            .header-logo { height: 32px !important; margin-top: -2px !important; }
         }
         .btn-add { background: var(--blue); color: #fff; border-color: var(--blue); }
         .btn-add:hover { background: var(--blue-hover); border-color: var(--blue-hover); }
         .btn-fs-top:hover, .btn-action-text:hover { background: #333; color: #fff; border-color: #555; }
         .btn-clear:hover { background: #500 !important; color: #fff !important; border-color: #ff4444 !important; }
         .header-actions button:disabled { opacity: 0.35; cursor: not-allowed; pointer-events: none; }
+        /* Pattern and size pickers on a generator cue's row */
+        .cue-select { background: #1a1a1a; color: #ccc; border: 1px solid #333; border-radius: 3px; font-size: 9px; font-weight: bold; height: 18px; padding: 0 5px; outline: none; cursor: pointer; min-width: 0; font-family: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .cue-select:hover { background: #333; color: #fff; border-color: #555; }
+        .cue-select:disabled { opacity: 0.4; cursor: not-allowed; }
+        .clip-badges .cue-select { flex: 2; }
+        /* The one dropdown list, used by PATTERN and the pickers above. Drawn by hand because a native
+           list's rows can't be given padding */
+        #pick-menu { display: none; position: fixed; z-index: 3000; background: #1f1f1f; border: 1px solid #555; border-radius: 4px; padding: 4px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.6); max-height: 80vh; overflow-y: auto; }
+        #pick-menu .pick-item { display: block; width: 100%; background: transparent; color: #ddd; border: none; border-radius: 3px; padding: 7px 14px; font-size: 12px; font-weight: bold; letter-spacing: 0.5px; text-align: left; white-space: nowrap; cursor: pointer; outline: none; }
+        #pick-menu .pick-item:hover { background: var(--blue); color: #fff; }
+        #pick-menu .pick-item.is-current { color: #fff; background: #333; }
+        #pick-menu .pick-item.is-current:hover { background: var(--blue); }
         .btn-fs-top.output-active { background: #16a34a !important; color: #fff !important; border-color: #22c55e !important; }
         .btn-fs-top.fullscreen-active { background: var(--blue) !important; color: #fff !important; border-color: var(--blue) !important; }
 
@@ -93,7 +106,7 @@
             cursor: default;
         }
 
-        #credits-modal-overlay, #clear-modal-overlay {
+        #credits-modal-overlay, #clear-modal-overlay, #delete-modal-overlay {
             position: fixed;
             top: 0; left: 0; width: 100vw; height: 100vh;
             background: rgba(0, 0, 0, 0.75);
@@ -447,6 +460,17 @@
         </div>
     </div>
 
+    <div id="delete-modal-overlay" onclick="hideDeleteModal()">
+        <div class="focus-modal" style="border-color: #ff4444; color: #fff; cursor: default; width: 440px;" onclick="event.stopPropagation()">
+            <div style="font-size: 14px; margin-bottom: 12px; color: #ff4444; font-weight: bold; letter-spacing: 1px;">DELETE CUE</div>
+            <div id="delete-modal-text" style="font-size: 14px; font-weight: normal; line-height: 1.5; color: #ddd; margin-bottom: 24px; overflow-wrap: anywhere;"></div>
+            <div style="display: flex; gap: 10px; justify-content: center;">
+                <button onclick="confirmDeleteClip(); this.blur();" style="background: #500; color: #fff; border: 1px solid #ff4444; padding: 8px 20px; font-size: 11px; font-weight: bold; border-radius: 3px; cursor: pointer; outline: none; text-transform: uppercase;">DELETE</button>
+                <button onclick="hideDeleteModal(); this.blur();" style="background: #222; color: #ccc; border: 1px solid #444; padding: 8px 20px; font-size: 11px; font-weight: bold; border-radius: 3px; cursor: pointer; outline: none; text-transform: uppercase;">CANCEL</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Error Console Modal Pop-up -->
     <div id="error-console-modal" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.8); display: none; align-items: center; justify-content: center; z-index: 999999;">
         <div style="width: 720px; height: 460px; background: #1a1a1a; border: 1px solid #444; border-radius: 6px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 15px 35px rgba(0,0,0,0.9);">
@@ -471,6 +495,8 @@
     <input type="file" id="browser-media-input" multiple accept="video/*,audio/*,image/*" style="display: none;" onchange="handleBrowserMediaUpload(event)">
     <input type="file" id="browser-json-input" accept=".json" style="display: none;" onchange="handleBrowserJsonUpload(event)">
 
+    <div id="pick-menu"></div>
+
     <div class="left-pane">
         <div class="playlist-header">
             <div class="header-title-container">
@@ -479,6 +505,7 @@
             </div>
             <div class="header-right">
                 <div class="header-actions">
+                    <button class="btn-action-text pick-anchor" id="pattern-menu" onclick="openPatternMenu(this); this.blur();">PATTERN</button>
                     <button class="btn-clear" onclick="clearCuelist()">CLEAR</button>
                     <button class="btn-action-text" onclick="loadCuelist()">IMPORT</button>
                     <button class="btn-action-text" onclick="saveCuelist()">EXPORT</button>
@@ -1189,6 +1216,271 @@
             return type === 'image' ? 'Raster Graphic' : 'H.264 / AAC';
         }
 
+        // ---- Test patterns ----
+        // The TEST PATTERNS list adds the bundled Grid or Sync Test, or a Test Pattern Generator cue.
+        // A generator cue is an ordinary image cue, so it plays through the normal image path. Its picture
+        // is a PNG drawn here from its recipe (clip.pattern: kind, width, height) and is never saved:
+        // the recipe is, and the picture is drawn again on load.
+        const PATTERN_KINDS = [
+            ['grid', 'GRID'], ['bars', 'COLOUR BARS'], ['greyscale', 'GREYSCALE'], ['checker', 'CHECKERBOARD'],
+            ['white', 'WHITE'], ['grey', '50% GREY'], ['red', 'RED'], ['green', 'GREEN'], ['blue', 'BLUE']
+        ];
+        const PATTERN_SOLIDS = { white: '#ffffff', grey: '#808080', red: '#ff0000', green: '#00ff00', blue: '#0000ff' };
+
+        // The logo on every pattern. It comes through the main process as a data: URL because a canvas that
+        // has drawn a file:// image can't be turned into a PNG. Cues wait for it on launch (end of this script).
+        let patternLogo = null;
+        const patternLogoReady = Promise.resolve(api.getPatternLogo?.()).then(src => new Promise(resolve => {
+            if (!src) { resolve(); return; }
+            const logo = new Image();
+            logo.onload = () => { patternLogo = logo; resolve(); };
+            logo.onerror = () => resolve();
+            logo.src = src;
+        })).catch(() => {});
+
+        // Same spot and size as on the bundled Grid. The logo has white and grey lettering, so outside the
+        // black grid it sits on a solid black panel.
+        function drawPatternLogo(g, w, h, onPanel) {
+            if (!patternLogo) return;
+            const logoW = 1000 * (w / 1920);
+            const logoH = logoW * patternLogo.naturalHeight / patternLogo.naturalWidth;
+            const x = (w - logoW) / 2;
+            const y = 180 * (h / 1080);
+            if (onPanel) {
+                const pad = 30 * (h / 1080);
+                g.fillStyle = '#000000';
+                g.fillRect(x - pad, y - pad, logoW + 2 * pad, logoH + 2 * pad);
+            }
+            g.drawImage(patternLogo, x, y, logoW, logoH);
+        }
+        const PATTERN_SIZES = [[1280, 720], [1920, 1080], [2560, 1440], [3840, 2160]];
+
+        // The same grid as the bundled Grid clip (tools/make-grid.ps1), scaled from its 1920x1080 layout,
+        // with the info lines showing the size actually drawn
+        function drawPatternGrid(g, w, h) {
+            const s = h / 1080;
+            const cellW = w / 16;
+            const cellH = h / 9;
+            const thin = Math.max(1, Math.round(s));
+            const cross = Math.max(2, Math.round(4 * s));
+            const border = Math.max(2, Math.round(2 * s));
+            g.fillStyle = '#000000';
+            g.fillRect(0, 0, w, h);
+
+            // Circles: touching top and bottom, a small one at the centre, and one from each corner
+            g.strokeStyle = '#ebebeb';
+            g.lineWidth = Math.max(1.5, 2.4 * s);
+            [[w / 2, h / 2, 539 * s], [w / 2, h / 2, 60 * s], [0, 0, 540 * s], [w, 0, 540 * s], [0, h, 540 * s], [w, h, 540 * s]].forEach(([x, y, r]) => {
+                g.beginPath();
+                g.arc(x, y, r, 0, Math.PI * 2);
+                g.stroke();
+            });
+
+            // Thin grid, app-green centre cross, white border
+            g.fillStyle = '#1a6b2c';
+            for (let i = 0; i <= 16; i++) g.fillRect(Math.round(i * cellW), 0, thin, h);
+            for (let j = 0; j <= 9; j++) g.fillRect(0, Math.round(j * cellH), w, thin);
+            g.fillStyle = '#28a745';
+            g.fillRect(Math.round(w / 2 - cross / 2), 0, cross, h);
+            g.fillRect(0, Math.round(h / 2 - cross / 2), w, cross);
+            g.fillStyle = '#ffffff';
+            g.fillRect(0, 0, w, border);
+            g.fillRect(0, h - border, w, border);
+            g.fillRect(0, 0, border, h);
+            g.fillRect(w - border, 0, border, h);
+
+            // Column numbers top and bottom, row letters left and right
+            g.font = `${26 * s}px Arial`;
+            g.textAlign = 'center';
+            for (let i = 0; i < 16; i++) {
+                const label = String(i < 8 ? i - 8 : i - 7);
+                const x = (i + 0.5) * cellW;
+                g.textBaseline = 'top';
+                g.fillText(label, x, 14 * s);
+                g.textBaseline = 'alphabetic';
+                g.fillText(label, x, h - 14 * s);
+            }
+            g.textBaseline = 'middle';
+            ['D', 'C', 'B', 'A', '', 'a', 'b', 'c', 'd'].forEach((label, j) => {
+                const y = (j + 0.5) * cellH + 2 * s;
+                g.textAlign = 'left';
+                g.fillText(label, 24 * s, y);
+                g.textAlign = 'right';
+                g.fillText(label, w - 24 * s, y);
+            });
+
+            // Info lines on dark panels
+            const divisor = (a, b) => (b ? divisor(b, a % b) : a);
+            const d = divisor(w, h);
+            g.textAlign = 'center';
+            g.textBaseline = 'top';
+            [[`${w} x ${h} PX`, 50, 12, 690, '#ffffff'],
+             [`${w / d}:${h / d}  /  ${(w / h).toFixed(2)}:1`, 40, 10, 772, '#ffffff'],
+             [`16 x 9 SQUARES OF ${Math.round(cellW)} PX`, 32, 10, 842, '#cccccc']].forEach(([text, size, pad, y, colour]) => {
+                g.font = `bold ${size * s}px Arial`;
+                const textW = g.measureText(text).width;
+                g.fillStyle = 'rgba(0, 0, 0, 0.75)';
+                g.fillRect(w / 2 - textW / 2 - pad * s, (y - pad) * s, textW + 2 * pad * s, (size + 2 * pad) * s);
+                g.fillStyle = colour;
+                g.fillText(text, w / 2, (y - 3) * s);
+            });
+        }
+
+        function drawPatternBars(g, w, h) {
+            const bars = ['#c0c0c0', '#c0c000', '#00c0c0', '#00c000', '#c000c0', '#c00000', '#0000c0'];
+            bars.forEach((colour, i) => {
+                const left = Math.round(i * w / bars.length);
+                g.fillStyle = colour;
+                g.fillRect(left, 0, Math.round((i + 1) * w / bars.length) - left, h);
+            });
+        }
+
+        function drawPatternGreyscale(g, w, h) {
+            const steps = 11;
+            for (let i = 0; i < steps; i++) {
+                const left = Math.round(i * w / steps);
+                const level = Math.round(i * 255 / (steps - 1));
+                g.fillStyle = `rgb(${level},${level},${level})`;
+                g.fillRect(left, 0, Math.round((i + 1) * w / steps) - left, h);
+            }
+        }
+
+        function drawPatternChecker(g, w, h) {
+            const cell = Math.round(h / 9);
+            g.fillStyle = '#000000';
+            g.fillRect(0, 0, w, h);
+            g.fillStyle = '#ffffff';
+            for (let row = 0; row * cell < h; row++) {
+                for (let col = row % 2; col * cell < w; col += 2) g.fillRect(col * cell, row * cell, cell, cell);
+            }
+        }
+
+        function drawPattern(pattern) {
+            const canvas = document.createElement('canvas');
+            canvas.width = pattern.width;
+            canvas.height = pattern.height;
+            const g = canvas.getContext('2d');
+            const { width: w, height: h } = pattern;
+            if (pattern.kind === 'grid') drawPatternGrid(g, w, h);
+            else if (pattern.kind === 'bars') drawPatternBars(g, w, h);
+            else if (pattern.kind === 'greyscale') drawPatternGreyscale(g, w, h);
+            else if (pattern.kind === 'checker') drawPatternChecker(g, w, h);
+            else { g.fillStyle = PATTERN_SOLIDS[pattern.kind]; g.fillRect(0, 0, w, h); }
+            drawPatternLogo(g, w, h, pattern.kind !== 'grid');
+            return canvas.toDataURL('image/png');
+        }
+
+        // Fills in everything about a generator cue that follows from its recipe
+        function applyPatternToCue(clip) {
+            const label = (PATTERN_KINDS.find(k => k[0] === clip.pattern.kind) || [])[1] || 'PATTERN';
+            clip.url = drawPattern(clip.pattern);
+            clip.fadeIn = 0; // no control for it on this cue, so an imported value can't linger
+            clip.name = `GENERATOR - ${label}`;
+            clip.originalName = `${clip.name}.png`;
+            clip.format = 'PNG';
+            clip.codec = 'GENERATED';
+        }
+
+        function finishAddingCue(clip) {
+            loadClipMetadata(clip);
+            playlist.push(clip);
+            renderPlaylist();
+            if (stagedIndex === -1) selectClip(0);
+            saveStateToLocalStorage();
+        }
+
+        async function addTestPattern(choice) {
+            if (isCuelistLocked() || !choice) return;
+            const base = { type: 'image', gain: 1.0, fadeIn: 0.0, fadeOut: 0.0, rotation: 0, endBehavior: 'hold' };
+            if (choice === 'generator') {
+                const clip = { ...base, pattern: { kind: 'bars', width: 1920, height: 1080 } };
+                applyPatternToCue(clip);
+                finishAddingCue(clip);
+                return;
+            }
+            const cues = (await api.getStarterCues?.()) || [];
+            const starter = cues.find(c => c.originalName.toLowerCase().startsWith(choice));
+            if (isCuelistLocked()) return;
+            if (!starter) { appendConsoleLog(`TEST PATTERN FILE NOT FOUND: ${choice.toUpperCase()}.`); return; }
+            finishAddingCue({
+                ...starter,
+                name: removeExtension(starter.originalName),
+                format: extractFormat(starter.originalName),
+                codec: extractCodec(starter.originalName, starter.type)
+            });
+        }
+
+        // The dropdown list under the PATTERN button and a generator cue's pickers. Mouse only: it takes no
+        // keys, so Enter, Space and Esc stay TAKE and KILL with a list open.
+        let pickMenuAnchor = null;
+
+        function closePickMenu() {
+            const menu = document.getElementById('pick-menu');
+            menu.style.display = 'none';
+            menu.replaceChildren();
+            pickMenuAnchor = null;
+        }
+
+        function openPickMenu(anchor, items, current, onPick) {
+            const wasOpenHere = pickMenuAnchor === anchor;
+            closePickMenu();
+            if (wasOpenHere) return;
+            const menu = document.getElementById('pick-menu');
+            items.forEach(([value, label]) => {
+                const item = document.createElement('button');
+                item.className = `pick-item${value === current ? ' is-current' : ''}`;
+                item.textContent = label;
+                item.onclick = () => { closePickMenu(); onPick(value); };
+                menu.appendChild(item);
+            });
+            pickMenuAnchor = anchor;
+            menu.style.display = 'block';
+            const a = anchor.getBoundingClientRect();
+            const m = menu.getBoundingClientRect();
+            const below = a.bottom + 3;
+            menu.style.left = `${Math.max(8, Math.min(a.left, innerWidth - m.width - 8))}px`;
+            menu.style.top = `${below + m.height <= innerHeight - 8 ? below : Math.max(8, a.top - m.height - 3)}px`;
+        }
+
+        // Clicking anywhere else, scrolling, resizing or leaving the window closes it
+        window.addEventListener('mousedown', (e) => {
+            if (!e.target.closest('#pick-menu') && !e.target.closest('.pick-anchor')) closePickMenu();
+        }, true);
+        window.addEventListener('scroll', (e) => { if (!e.target.closest?.('#pick-menu')) closePickMenu(); }, true);
+        window.addEventListener('resize', closePickMenu);
+        window.addEventListener('blur', closePickMenu);
+
+        function openPatternMenu(anchor) {
+            if (isCuelistLocked()) return;
+            openPickMenu(anchor, [['grid', 'GRID'], ['sync', 'SYNC TEST'], ['generator', 'GENERATOR']], null, addTestPattern);
+        }
+
+        function patternSizeLabel(clip) {
+            return `${clip.pattern.width}X${clip.pattern.height}`;
+        }
+
+        function openPatternKindMenu(idx, anchor) {
+            openPickMenu(anchor, PATTERN_KINDS, playlist[idx].pattern.kind, kind => setPatternOption(idx, kind));
+        }
+
+        function openPatternSizeMenu(idx, anchor) {
+            const current = patternSizeLabel(playlist[idx]);
+            const sizes = PATTERN_SIZES.map(([w, h]) => `${w}X${h}`);
+            if (!sizes.includes(current)) sizes.push(current);
+            openPickMenu(anchor, sizes.map(s => [s, s]), current, size => setPatternOption(idx, null, size));
+        }
+
+        // The pattern and size pickers on a generator cue's row (like its other controls, off while live)
+        function setPatternOption(idx, kind, size) {
+            const clip = playlist[idx];
+            if (idx === currentIndex || !clip?.pattern) return;
+            if (kind) clip.pattern.kind = kind;
+            if (size) [clip.pattern.width, clip.pattern.height] = size.split('X').map(Number);
+            applyPatternToCue(clip);
+            loadClipMetadata(clip, () => { if (stagedIndex === idx) selectClip(idx); });
+            saveStateToLocalStorage();
+        }
+
         function loadClipMetadata(clip, callback) {
             if (clip.type === 'image') {
                 const img = new Image();
@@ -1261,7 +1553,8 @@
                 const cleanData = playlist.map(c => ({
                     originalName: c.originalName || c.name,
                     name: c.name,
-                    url: c.url,
+                    url: c.pattern ? '' : c.url,
+                    pattern: c.pattern,
                     type: c.type,
                     gain: c.gain !== undefined ? c.gain : 1.0,
                     fadeIn: c.fadeIn !== undefined ? c.fadeIn : 0.0,
@@ -1298,6 +1591,29 @@
             renderPlaylist();
             selectClip(stagedIndex);
             saveStateToLocalStorage();
+        }
+
+        // The × on a cue asks first. The popup takes no keys, so Enter and Esc stay TAKE and KILL while it
+        // is open, and it holds the cue itself rather than its row, as the list can change meanwhile.
+        let cueToDelete = null;
+
+        function requestDeleteClip(idx) {
+            const clip = playlist[idx];
+            if (!clip || idx === currentIndex) return;
+            cueToDelete = clip;
+            document.getElementById('delete-modal-text').textContent = `Delete cue ${String(idx + 1).padStart(2, '0')}, "${clip.name}"?`;
+            document.getElementById('delete-modal-overlay').style.display = 'flex';
+        }
+
+        function hideDeleteModal() {
+            cueToDelete = null;
+            document.getElementById('delete-modal-overlay').style.display = 'none';
+        }
+
+        function confirmDeleteClip() {
+            const clip = cueToDelete;
+            hideDeleteModal();
+            deleteClip(playlist.indexOf(clip)); // refuses a cue that has gone live or is already gone
         }
 
         function deleteClip(idx) {
@@ -1357,6 +1673,7 @@
         }
 
         function renderPlaylist() {
+            closePickMenu(); // its anchor is about to be redrawn, or the cue may have gone live
             updateCuelistLock();
             const container = document.getElementById('playlist');
             const emptyMsg = document.getElementById('empty-msg');
@@ -1410,8 +1727,8 @@
                     badgesHtml = `
                         <div class="clip-badges">
                             <button class="badge active-hold badge-fixed" title="PHOTOS ALWAYS HOLD">HOLD</button>
-                            <span class="badge slot-spacer" aria-hidden="true"></span>
-                            <span class="badge slot-spacer" aria-hidden="true"></span>
+                            ${clip.pattern ? `<button class="cue-select pick-anchor" ${isLive ? 'disabled' : ''} onclick="openPatternKindMenu(${idx}, this); this.blur();" title="TEST PATTERN">${(PATTERN_KINDS.find(k => k[0] === clip.pattern.kind) || [])[1] || ''}</button>` : `<span class="badge slot-spacer" aria-hidden="true"></span>
+                            <span class="badge slot-spacer" aria-hidden="true"></span>`}
                             <button class="badge ${rotVal > 0 ? 'active-rot' : ''}" ${isLive ? 'disabled' : ''} onclick="cycleClipRotation(${idx})" title="ROTATION: ${rotVal}° (CLICK TO TURN 90°)">${rotVal > 0 ? `${rotVal}°` : rotateSvg}</button>
                         </div>
                     `;
@@ -1424,6 +1741,16 @@
                         <span id="fadein-val-${idx}">${clip.fadeIn.toFixed(1)}S</span>
                     </div>
                 `;
+
+                // A generator cue has no fade: its SIZE picker takes the place of FADE IN
+                if (clip.pattern) {
+                    fadeControlsHtml = `
+                        <div class="fade-group">
+                            <span>SIZE:</span>
+                            <button class="cue-select pick-anchor" ${isLive ? 'disabled' : ''} onclick="openPatternSizeMenu(${idx}, this); this.blur();" title="PATTERN RESOLUTION">${patternSizeLabel(clip)}</button>
+                        </div>
+                    `;
+                }
 
                 if (clip.type !== 'image') {
                     fadeControlsHtml += `
@@ -1471,16 +1798,16 @@
                                 <span class="clip-name" title="${escapeHtml(clip.name)}">${escapeHtml(clip.name)}</span>
                             </div>
                             <div class="clip-right-group" onclick="event.stopPropagation()">
-                                <div class="clip-controls">
+                                ${clip.type === 'image' ? '' : `<div class="clip-controls">
                                     <div class="control-group">
                                         ${volumeSvg}
                                         <input type="range" id="vol-input-${idx}" class="inline-volume ${volumeStateClass(clip.gain)}" min="0" max="200" step="1" value="${gainToFaderPos(clip.gain)}" style="--vol-pct: ${gainToFaderPos(clip.gain) / 2}%" ${isLive ? 'disabled' : ''} oninput="setClipGain(${idx}, this.value)" onchange="this.blur()" onmouseup="this.blur()" ondblclick="resetClipGain(${idx})" title="VOLUME: ${Math.round(clip.gain * 100)}% (DOUBLE-CLICK: 100%)">
                                     </div>
-                                </div>
+                                </div>`}
                                 <div class="cue-actions">
                                     <button class="cue-btn" onclick="moveClip(${idx}, -1)" ${idx === 0 || isPlaying ? 'disabled' : ''} title="Move Up">▲</button>
                                     <button class="cue-btn" onclick="moveClip(${idx}, 1)" ${idx === playlist.length - 1 || isPlaying ? 'disabled' : ''} title="Move Down">▼</button>
-                                    <button class="cue-btn btn-delete-cue" onclick="deleteClip(${idx})" ${isLive ? 'disabled' : ''} title="${isLive ? 'Cannot delete LIVE cue' : 'Delete Cue'}">×</button>
+                                    <button class="cue-btn btn-delete-cue" onclick="requestDeleteClip(${idx}); this.blur();" ${isLive ? 'disabled' : ''} title="${isLive ? 'Cannot delete LIVE cue' : 'Delete Cue'}">×</button>
                                 </div>
                             </div>
                         </div>
@@ -1750,6 +2077,7 @@
                     format: c.format || extractFormat(original),
                     codec: c.codec || extractCodec(original, c.type)
                 };
+                if (clip.pattern) applyPatternToCue(clip);
                 loadClipMetadata(clip);
                 return clip;
             });
@@ -2574,6 +2902,7 @@
                             format: c.format || extractFormat(original),
                             codec: c.codec || extractCodec(original, c.type)
                         };
+                        if (clip.pattern) applyPatternToCue(clip);
                         loadClipMetadata(clip);
                         return clip;
                     });
@@ -2652,7 +2981,7 @@
         });
 
         updatePointsUi();
-        autoloadLastCuelist();
+        patternLogoReady.finally(autoloadLastCuelist); // saved patterns need the logo when they redraw
     </script>
 </body>
 </html>
