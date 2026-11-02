@@ -35,6 +35,13 @@ contextBridge.exposeInMainWorld('playbackAPI', {
     loadLastCuelist: () => ipcRenderer.invoke('load-last-cuelist'),
     getStarterCues: () => ipcRenderer.invoke('get-starter-cues'),
     getPatternLogo: () => ipcRenderer.invoke('get-pattern-logo'),
+    readPdf: (url) => ipcRenderer.invoke('read-pdf', url),
+    showPage: (url) => ipcRenderer.send('show-page', url),
+    onShowPage: (callback) => {
+        const handler = (event, url) => callback(url);
+        ipcRenderer.on('show-page', handler);
+        return () => ipcRenderer.removeListener('show-page', handler);
+    },
 
     // Event Listeners (Incoming from Main Process)
     onOutputWindowStatus: (callback) => {

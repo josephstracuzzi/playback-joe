@@ -6,7 +6,7 @@
 const { app, BrowserWindow, ipcMain, dialog, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { pathToFileURL } = require('url');
+const { pathToFileURL, fileURLToPath } = require('url');
 
 // Single instance: a second launch exits immediately and focuses the running operator window,
 // so two copies can't fight over the output display or the cuelist autosave.
@@ -400,16 +400,34 @@ function isPatternPicture(url) {
     return typeof url === 'string' && url.startsWith('data:image/png;base64,') && url.length <= MAX_PATTERN_URL_LENGTH;
 }
 
+// A PDF is one image cue: `pdf` holds the file and page, and its picture is the page the operator drew.
+// Like a pattern, the picture is never saved; the page is drawn again on load.
+const MAX_PDF_BYTES = 300 * 1024 * 1024;
+
+function isPdfFile(url) {
+    return isLocalFileUrl(url) && /\.pdf$/i.test(new URL(url).pathname);
+}
+
+function cleanPdf(p) {
+    if (!p || typeof p !== 'object' || !isPdfFile(p.file)) return null;
+    const page = Number.isInteger(p.page) && p.page >= 1 ? p.page : 1;
+    const pages = Number.isInteger(p.pages) && p.pages >= 1 ? p.pages : 1;
+    return { file: p.file, page, pages };
+}
+
 function cleanCue(c) {
     if (!c || typeof c !== 'object') return null;
     const originalName = c.originalName || c.name;
     const pattern = c.type === 'image' ? cleanPattern(c.pattern) : null;
+    const pdf = c.type === 'image' ? cleanPdf(c.pdf) : null;
+    const drawn = !!pattern || !!pdf;
     if (typeof originalName !== 'string' || !CUE_TYPES.includes(c.type)) return null;
-    if (!pattern && !isLocalFileUrl(c.url)) return null;
+    if (!drawn && !isLocalFileUrl(c.url)) return null;
     return {
         originalName: originalName.slice(0, 512),
-        url: pattern ? (isPatternPicture(c.url) ? c.url : '') : c.url,
+        url: drawn ? (isPatternPicture(c.url) ? c.url : '') : c.url,
         ...(pattern ? { pattern } : {}),
+        ...(pdf ? { pdf } : {}),
         type: c.type,
         gain: numberInRange(c.gain, 0, 3, 1.0),
         fadeIn: numberInRange(c.fadeIn, 0, 5, 0.0),
@@ -422,10 +440,10 @@ function cleanCue(c) {
     };
 }
 
-// What goes into a cuelist file: a pattern keeps its recipe, not its picture
+// What goes into a cuelist file: a pattern or PDF keeps its recipe, not its picture
 function cueForSaving(c) {
     const cue = cleanCue(c);
-    if (cue && cue.pattern) cue.url = '';
+    if (cue && (cue.pattern || cue.pdf)) cue.url = '';
     return cue;
 }
 
@@ -558,6 +576,14 @@ ipcMain.on('output-resumed', (event, token) => {
     }
 });
 
+// A live PDF cue changed page: straight to the output, as the operator already has the picture
+ipcMain.on('show-page', (event, url) => {
+    if (!fromOperator(event) || !isPatternPicture(url)) return;
+    if (outputWindow && !outputWindow.isDestroyed()) {
+        outputWindow.webContents.send('show-page', url);
+    }
+});
+
 ipcMain.on('program-command', (event, command, value) => {
     if (!fromOperator(event) || !PROGRAM_COMMANDS.includes(command)) return;
     if ((command === 'seek' || command === 'goto-end') && !(Number.isFinite(value) && value >= 0)) return;
@@ -623,7 +649,7 @@ ipcMain.handle('dialog:openFile', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
         properties: ['openFile', 'multiSelections'],
         filters: [
-            { name: 'Media Files', extensions: ['mp4', 'm4v', 'webm', 'mov', 'mp3', 'wav', 'aac', 'jpg', 'jpeg', 'png', 'gif'] }
+            { name: 'Media Files', extensions: ['mp4', 'm4v', 'webm', 'mov', 'mp3', 'wav', 'aac', 'jpg', 'jpeg', 'png', 'gif', 'pdf'] }
         ]
     });
 
@@ -633,7 +659,7 @@ ipcMain.handle('dialog:openFile', async () => {
         const ext = path.extname(filePath).toLowerCase();
         let type = 'video';
         if (['.mp3', '.wav', '.aac', '.ogg', '.flac'].includes(ext)) type = 'audio';
-        else if (['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext)) type = 'image';
+        else if (['.jpg', '.jpeg', '.png', '.gif', '.webp', '.pdf'].includes(ext)) type = 'image';
 
         return {
             name: path.basename(filePath),
@@ -768,6 +794,19 @@ function loadStarterCues() {
         return null;
     }
 }
+
+// The bytes of a PDF cue's file, for the operator to draw pages from
+ipcMain.handle('read-pdf', (event, url) => {
+    if (!fromOperator(event) || !isPdfFile(url)) return null;
+    try {
+        const file = fileURLToPath(url);
+        if (fs.statSync(file).size > MAX_PDF_BYTES) return null;
+        return fs.readFileSync(file);
+    } catch (err) {
+        console.error('Failed to read PDF:', err);
+        return null;
+    }
+});
 
 // The bundled Grid and Sync Test, for the TEST PATTERNS list
 ipcMain.handle('get-starter-cues', () => loadStarterCues() || []);

@@ -1,6 +1,6 @@
 {
   "name": "playback-joe",
-  "version": "10.25.10",
+  "version": "10.26.4",
   "description": "Professional cue-based media playback application for Windows, macOS and Linux with dual display support",
   "main": "main.js",
   "scripts": {
@@ -66,6 +66,7 @@
       "output.html",
       "logo.png",
       "grid-logo.png",
+      "vendor/pdfjs/**",
       "logo.ico",
       "icon.png"
     ]

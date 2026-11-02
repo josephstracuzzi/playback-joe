@@ -384,6 +384,11 @@
         .fade-group input[type="range"].fade-active { --fade-thumb: var(--blue); }
         .fade-group input[type="range"]:disabled { opacity: 0.4; cursor: not-allowed; }
         .fade-group span { width: 20px; text-align: right; font-family: var(--font-mono); color: #ccc; }
+        .fade-group span:first-child { text-align: left; }
+        /* PDF page buttons and the generator SIZE picker fill the FADE IN slot edge to edge (20 + 65 + 20 + two 4px gaps) */
+        .fade-group.fade-slot { width: 113px; }
+        .fade-slot span { width: auto; }
+        .fade-slot .cue-select { flex: 1; min-width: 0; }
 
         /* Format / codec / resolution tags drop out one at a time when the row gets narrow:
            row-reverse + wrap lays them out right-to-left, any tag that doesn't fit wraps onto a
@@ -397,6 +402,10 @@
         .cue-meta-info .meta-tag { line-height: 12px; white-space: nowrap; }
         .meta-tag { color: #b5b5b5; background: #1c1c1c; border: 1px solid #333; padding: 2px 5px; border-radius: 2px; }
         .runtime-badge { color: #e5e5e5; font-weight: bold; font-size: 12px; font-variant-numeric: tabular-nums; font-family: var(--font-mono); white-space: nowrap; flex-shrink: 0; }
+        /* Below this the row can't fit a whole tag, so all of them go. The empty group still holds the runtime on the right. */
+        @media (max-width: 1200px) {
+            .cue-meta-info .meta-tag { display: none; }
+        }
 
         .empty-playlist { color: #a3a3a3; text-align: center; margin: auto; padding: 40px 10px; display: flex; flex-direction: column; align-items: center; gap: 12px; font-family: var(--font-mono); }
         /* Title and hint are sized so both lines are the same width (measured in Consolas) */
@@ -418,9 +427,9 @@
         .shortcut-hint kbd.kbd-arrow { font-size: 15px; line-height: 13px; padding: 1px 4px; }
         /* Narrow operator window: tighter spacing keeps all five hints on one row */
         @media (max-width: 1250px) {
-            .shortcut-hint { gap: 6px 10px; }
-            .shortcut-hint .shortcut { gap: 4px; }
-            .shortcut-hint kbd { padding: 1px 4px; }
+            .shortcut-hint { gap: 6px 7px; font-size: 10px; padding: 7px 4px; }
+            .shortcut-hint .shortcut { gap: 3px; }
+            .shortcut-hint kbd { padding: 1px 3px; font-size: 10px; }
         }
         
         .monitor-box video, .monitor-box img { width: 100%; height: 100%; object-fit: contain; opacity: 0; display: none; }
@@ -511,7 +520,7 @@
                     <button class="btn-action-text" onclick="saveCuelist()">EXPORT</button>
                     <button class="btn-add" onclick="addLocalMedia()">+ ADD MEDIA</button>
                 </div>
-                <div class="format-hint" title="ACCEPTED: MP4, M4V, WEBM, MOV, MP3, WAV, AAC, JPG, PNG, GIF">ACCEPTED: MP4, M4V, WEBM, MOV, MP3, WAV, AAC, JPG, PNG, GIF</div>
+                <div class="format-hint" title="ACCEPTED: MP4, M4V, WEBM, MOV, MP3, WAV, AAC, JPG, PNG, GIF, PDF">ACCEPTED: MP4, M4V, WEBM, MOV, MP3, WAV, AAC, JPG, PNG, GIF, PDF</div>
             </div>
         </div>
 
@@ -528,6 +537,7 @@
             <span class="shortcut"><kbd>ESC</kbd><kbd>BACKSPACE</kbd> KILL</span>
             <span class="shortcut" title="STEPS THE LIVE CUE ONE FRAME (ONLY AFTER PAUSE, NOT ON A HOLD)"><kbd class="kbd-arrow">←</kbd><kbd class="kbd-arrow">→</kbd> FRAME</span>
             <span class="shortcut" title="SETS THE LIVE CUE'S IN / OUT POINT AT THE FRAME ON SCREEN"><kbd>I</kbd><kbd>O</kbd> IN / OUT</span>
+            <span class="shortcut" title="PREVIOUS / NEXT PAGE ON A LIVE PDF CUE (MAIN KEYBOARD OR NUMPAD)"><kbd>-</kbd><kbd>+</kbd> PAGE</span>
         </div>
     </div>
 
@@ -1481,7 +1491,131 @@
             saveStateToLocalStorage();
         }
 
+        // ---- PDF cues ----
+        // A PDF is one image cue: clip.pdf holds the file, page and page count. pdf.js draws the current
+        // page to a PNG (clip.url), so it plays through the normal image path. The picture is never saved.
+        // Page changes on a live cue reach the output through `show-page`, as an instant cut.
+        const PDF_FIT_W = 1920;
+        const PDF_FIT_H = 1080;
+        const PDF_PAGES_KEPT = 12;
+        const PDF_PAGE_KEYS = { Minus: -1, NumpadSubtract: -1, Equal: 1, NumpadAdd: 1 };
+        const pdfDocs = new Map();
+        const pdfPages = new Map();
+        let pdfjsLib = null;
+
+        function loadPdfjs() {
+            if (!pdfjsLib) {
+                pdfjsLib = import('./vendor/pdfjs/pdf.min.mjs').then(lib => {
+                    lib.GlobalWorkerOptions.workerSrc = new URL('vendor/pdfjs/pdf.worker.min.mjs', location.href).href;
+                    return lib;
+                }).catch(err => { pdfjsLib = null; throw err; });
+            }
+            return pdfjsLib;
+        }
+
+        function openPdf(file) {
+            if (!pdfDocs.has(file)) {
+                const opening = (async () => {
+                    const lib = await loadPdfjs();
+                    const data = await api.readPdf(file);
+                    if (!data) throw new Error('FILE MISSING OR TOO LARGE');
+                    return lib.getDocument({ data, isEvalSupported: false }).promise;
+                })();
+                opening.catch(() => pdfDocs.delete(file));
+                pdfDocs.set(file, opening);
+            }
+            return pdfDocs.get(file);
+        }
+
+        // One page as a PNG, fitted inside 1920x1080. Recent pages are kept so stepping back is instant.
+        async function drawPdfPage(file, number) {
+            const key = `${number}|${file}`;
+            if (pdfPages.has(key)) return pdfPages.get(key);
+            const doc = await openPdf(file);
+            const page = await doc.getPage(number);
+            const size = page.getViewport({ scale: 1 });
+            const viewport = page.getViewport({ scale: Math.min(PDF_FIT_W / size.width, PDF_FIT_H / size.height) });
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.round(viewport.width);
+            canvas.height = Math.round(viewport.height);
+            await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+            const url = canvas.toDataURL('image/png');
+            pdfPages.set(key, url);
+            if (pdfPages.size > PDF_PAGES_KEPT) pdfPages.delete(pdfPages.keys().next().value);
+            return url;
+        }
+
+        function drawNearbyPdfPages(clip) {
+            [clip.pdf.page + 1, clip.pdf.page - 1].forEach(n => {
+                if (n >= 1 && n <= clip.pdf.pages) drawPdfPage(clip.pdf.file, n).catch(() => {});
+            });
+        }
+
+        // First load of a PDF cue (add, import, launch): open it and draw its current page
+        async function preparePdfCue(clip, callback) {
+            clip.fadeIn = 0; // no control for it on this cue, so an imported value can't linger
+            clip.format = 'PDF';
+            clip.durationStr = 'PDF';
+            clip.resolution = 'LOADING...';
+            renderPlaylist();
+            try {
+                const doc = await openPdf(clip.pdf.file);
+                clip.pdf.pages = doc.numPages;
+                clip.pdf.page = Math.min(clip.pdf.page, doc.numPages);
+                clip.url = await drawPdfPage(clip.pdf.file, clip.pdf.page);
+                clip.codec = `${doc.numPages} PAGE${doc.numPages === 1 ? '' : 'S'}`;
+                clip.resolution = `${PDF_FIT_W}X${PDF_FIT_H}`;
+                delete clip.mediaError;
+                drawNearbyPdfPages(clip);
+            } catch (err) {
+                clip.mediaError = 'PDF MISSING OR UNREADABLE';
+                clip.resolution = 'UNKNOWN';
+            }
+            if (callback) callback();
+            renderPlaylist();
+            if (playlist[stagedIndex] === clip) selectClip(stagedIndex);
+        }
+
+        // Go to a page. The live cue, its PGM monitor and the output all follow as an instant cut; the
+        // page number updates at once, and if keys come faster than pages draw, only the newest shows.
+        async function showPdfPage(clip, number) {
+            const page = Math.max(1, Math.min(clip.pdf.pages, number));
+            if (page === clip.pdf.page) return;
+            clip.pdf.page = page;
+            const request = clip.pdfRequest = (clip.pdfRequest || 0) + 1;
+            renderPlaylist();
+            saveStateToLocalStorage();
+            try {
+                const url = await drawPdfPage(clip.pdf.file, page);
+                if (request !== clip.pdfRequest) return;
+                clip.url = url;
+                if (playlist[currentIndex] === clip) {
+                    document.getElementById('program-image').src = url;
+                    api.showPage?.(url);
+                }
+                if (playlist[stagedIndex] === clip) document.getElementById('preview-image').src = url;
+                drawNearbyPdfPages(clip);
+            } catch (err) {
+                appendConsoleLog(`PDF PAGE ${page} COULD NOT BE DRAWN: ${err.message}`);
+            }
+        }
+
+        function stepPdfPage(idx, step) {
+            const clip = playlist[idx];
+            if (clip?.pdf) showPdfPage(clip, clip.pdf.page + step);
+        }
+
+        function openPdfPageMenu(idx, anchor) {
+            const clip = playlist[idx];
+            const items = Array.from({ length: clip.pdf.pages }, (_, i) => [i + 1, String(i + 1)]);
+            openPickMenu(anchor, items, clip.pdf.page, page => showPdfPage(clip, page));
+        }
+
         function loadClipMetadata(clip, callback) {
+            if (clip.pdf) {
+                preparePdfCue(clip, callback);
+                return;
+            }
             if (clip.type === 'image') {
                 const img = new Image();
                 img.src = clip.url;
@@ -1553,8 +1687,9 @@
                 const cleanData = playlist.map(c => ({
                     originalName: c.originalName || c.name,
                     name: c.name,
-                    url: c.pattern ? '' : c.url,
+                    url: (c.pattern || c.pdf) ? '' : c.url,
                     pattern: c.pattern,
+                    pdf: c.pdf,
                     type: c.type,
                     gain: c.gain !== undefined ? c.gain : 1.0,
                     fadeIn: c.fadeIn !== undefined ? c.fadeIn : 0.0,
@@ -1727,7 +1862,7 @@
                     badgesHtml = `
                         <div class="clip-badges">
                             <button class="badge active-hold badge-fixed" title="PHOTOS ALWAYS HOLD">HOLD</button>
-                            ${clip.pattern ? `<button class="cue-select pick-anchor" ${isLive ? 'disabled' : ''} onclick="openPatternKindMenu(${idx}, this); this.blur();" title="TEST PATTERN">${(PATTERN_KINDS.find(k => k[0] === clip.pattern.kind) || [])[1] || ''}</button>` : `<span class="badge slot-spacer" aria-hidden="true"></span>
+                            ${clip.pattern ? `<button class="cue-select pick-anchor" ${isLive ? 'disabled' : ''} onclick="openPatternKindMenu(${idx}, this); this.blur();" title="TEST PATTERN">${(PATTERN_KINDS.find(k => k[0] === clip.pattern.kind) || [])[1] || ''}</button>` : clip.pdf ? `<button class="cue-select pick-anchor" onclick="openPdfPageMenu(${idx}, this); this.blur();" title="GO TO PAGE">${clip.pdf.page} / ${clip.pdf.pages}</button>` : `<span class="badge slot-spacer" aria-hidden="true"></span>
                             <span class="badge slot-spacer" aria-hidden="true"></span>`}
                             <button class="badge ${rotVal > 0 ? 'active-rot' : ''}" ${isLive ? 'disabled' : ''} onclick="cycleClipRotation(${idx})" title="ROTATION: ${rotVal}° (CLICK TO TURN 90°)">${rotVal > 0 ? `${rotVal}°` : rotateSvg}</button>
                         </div>
@@ -1742,10 +1877,21 @@
                     </div>
                 `;
 
+                // A PDF cue has no fade: its page buttons take the place of FADE IN. They stay on while
+                // the cue is live, as that is when pages are changed.
+                if (clip.pdf) {
+                    fadeControlsHtml = `
+                        <div class="fade-group fade-slot">
+                            <button class="cue-select" ${clip.pdf.page <= 1 ? 'disabled' : ''} onclick="stepPdfPage(${idx}, -1); this.blur();" title="PREVIOUS PAGE (- KEY ON THE LIVE CUE)">◀ PREV</button>
+                            <button class="cue-select" ${clip.pdf.page >= clip.pdf.pages ? 'disabled' : ''} onclick="stepPdfPage(${idx}, 1); this.blur();" title="NEXT PAGE (+ KEY ON THE LIVE CUE)">NEXT ▶</button>
+                        </div>
+                    `;
+                }
+
                 // A generator cue has no fade: its SIZE picker takes the place of FADE IN
                 if (clip.pattern) {
                     fadeControlsHtml = `
-                        <div class="fade-group">
+                        <div class="fade-group fade-slot">
                             <span>SIZE:</span>
                             <button class="cue-select pick-anchor" ${isLive ? 'disabled' : ''} onclick="openPatternSizeMenu(${idx}, this); this.blur();" title="PATTERN RESOLUTION">${patternSizeLabel(clip)}</button>
                         </div>
@@ -1927,10 +2073,11 @@
                     if (files && files.length > 0) {
                         files.forEach(f => {
                             const original = f.name;
+                            const isPdf = /\.pdf$/i.test(original);
                             const clip = {
                                 name: removeExtension(original),
                                 originalName: original,
-                                url: f.url,
+                                url: isPdf ? '' : f.url,
                                 type: f.type,
                                 gain: 1.0,
                                 fadeIn: 0.0,
@@ -1940,6 +2087,7 @@
                                 format: extractFormat(original),
                                 codec: extractCodec(original, f.type)
                             };
+                            if (isPdf) clip.pdf = { file: f.url, page: 1, pages: 1 };
                             loadClipMetadata(clip);
                             playlist.push(clip);
                         });
@@ -2540,6 +2688,10 @@
                 loadClipMetadata(takeClip);
                 return;
             }
+            if (takeClip && takeClip.pdf && !takeClip.url) {
+                appendConsoleLog(`TAKE BLOCKED: CUE ${String(takeIdx + 1).padStart(2, '0')} "${takeClip.name}" - PDF IS STILL LOADING.`);
+                return;
+            }
 
             if (isKilling) {
                 if (killTimer) { clearTimeout(killTimer); killTimer = null; }
@@ -2940,6 +3092,16 @@
             }
             if (isSlider && ['Home', 'End', 'PageUp', 'PageDown'].includes(e.code)) return;
             const plainKey = !e.ctrlKey && !e.altKey && !e.metaKey;
+
+            // - and + (main keyboard or numpad) turn the page, on a live PDF cue only
+            if (PDF_PAGE_KEYS[e.code] && plainKey) {
+                const live = playlist[currentIndex];
+                if (live?.pdf && !isKilling) {
+                    e.preventDefault();
+                    stepPdfPage(currentIndex, PDF_PAGE_KEYS[e.code]);
+                }
+                return;
+            }
 
             if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
                 // ← → step the live cue one frame, but only while the program is paused (PAUSE, a frame

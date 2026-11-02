@@ -403,6 +403,23 @@
             });
         });
 
+        // A live PDF cue changed page: an instant cut. The new page is decoded first so the old one stays
+        // on screen until it can be swapped in one step, and only the newest request counts.
+        let pageRequest = 0;
+
+        api?.onShowPage?.((url) => {
+            if (currentClip?.type !== 'image') return;
+            const clip = currentClip;
+            const request = ++pageRequest;
+            const next = new Image();
+            next.src = url;
+            next.decode().catch(() => {}).finally(() => {
+                if (request !== pageRequest || currentClip !== clip) return;
+                clip.url = url; // the media error checks compare the shown picture with the cue
+                img.src = url;
+            });
+        });
+
         // Media failure: drop the output to clean black and tell the operator which clip failed.
         // Clearing src ('') on TAKE/KILL also fires 'error' events, so only act when the element
         // still holds the current clip's URL and actually reports a failure.

@@ -29,7 +29,7 @@ Your settings, your autosaved cuelist and the starter clips are kept in your app
 - Plug in or unplug a projector mid-show and the output moves to the right screen without stopping playback.
 
 ### Cuelist
-- Add video, audio and images: **MP4, M4V, WEBM, MOV, MP3, WAV, AAC, JPG, PNG, GIF**.
+- Add video, audio, images and PDFs: **MP4, M4V, WEBM, MOV, MP3, WAV, AAC, JPG, PNG, GIF, PDF**.
 - Each cue shows its type, resolution, codec and running time.
 - Per-cue **end behaviour**: **HOLD** on the last frame, **LOOP**, or **ADV**ance to the next cue.
 - Per-cue **fade in and fade out** for both picture and sound.
@@ -56,6 +56,10 @@ Your settings, your autosaved cuelist and the starter clips are kept in your app
 | **↑ / ↓** | Select the previous / next cue |
 | **Enter**, **Numpad Enter** or **Space** | TAKE |
 | **Esc** or **Backspace** | KILL |
+| **-** / **+** | Previous / next page on a live PDF cue (main keyboard or numpad) |
+
+### PDF slides
+Add a **PDF** with ADD MEDIA and it becomes one cue. Pick a page from its dropdown, or step with **◀ PREV** and **NEXT ▶**, or press **-** and **+** (main keyboard or numpad) while it's live. Pages cut instantly on the output. For a PowerPoint deck, export it as a PDF first. Animations, transitions and embedded video don't carry over.
 
 ### Test patterns
 The **PATTERN** list next to CLEAR adds a test cue to the cuelist: the bundled **Grid** or **Sync Test**, or a **Generator** cue. A generator cue is a normal cue with its own pattern and size pickers: grid, colour bars, greyscale, checkerboard or a solid colour, from 720p to 4K.
