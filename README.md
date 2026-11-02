@@ -73,10 +73,11 @@ The **PATTERN** list next to CLEAR adds a test cue to the cuelist: the bundled *
 
 <img src="docs/feature-test-patterns.png" width="738" alt="A generator cue with its pattern list open, showing grid, colour bars, greyscale, checkerboard and solid colours">
 
-### Starter clips
-A fresh install opens with two test clips made for Playback Joe:
+### Starter cues
+A fresh install opens with three test cues made for Playback Joe:
 - **Grid - Playback Joe - 1920x1080**: a projector alignment grid with labelled rows and columns, centre cross and circles.
 - **Sync Test - Playback Joe - 1920x1080x30p**: a one-frame flash with a beep every second, alternating left and right, for checking audio/video sync and speaker channels.
+- **Generator - Colour Bars**: a generator cue set to colour bars. Change its pattern or size right on the cue.
 
 ---
 
