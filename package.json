@@ -1,6 +1,6 @@
 {
   "name": "playback-joe",
-  "version": "10.20.2",
+  "version": "10.24.2",
   "description": "Professional cue-based media playback application for Windows, macOS and Linux with dual display support",
   "main": "main.js",
   "scripts": {
@@ -34,7 +34,13 @@
     },
     "mac": {
       "target": [
-        { "target": "zip", "arch": ["x64", "arm64"] }
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ],
       "icon": "icon.png",
       "category": "public.app-category.video"

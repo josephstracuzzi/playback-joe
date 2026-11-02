@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>PLAYBACK JOE 10.20.2 - OUTPUT</title>
+    <title>PLAYBACK JOE - OUTPUT</title>
     <style>
         * {
             box-sizing: border-box;
@@ -64,6 +64,8 @@
             reportMediaError: (info) => require('electron').ipcRenderer.send('output-media-error', info)
         } : null);
 
+        api?.getAppVersion?.().then(version => { document.title = `PLAYBACK JOE ${version} - OUTPUT`; });
+
         const vid = document.getElementById('output-video');
         const img = document.getElementById('output-image');
         const aud = document.getElementById('output-audio');
@@ -76,6 +78,30 @@
         let lastReportedTime = 0;
         let currentEndBehavior = 'hold';
         let killCleanupTimer = null;
+
+        // ---- Cue IN / OUT points ----
+        // A cue with points starts at IN and ends at OUT: fades, HOLD, ADV and LOOP all work from them.
+        // A cue without points (inPoint 0, no outPoint) keeps the plain path: native loop, natural end.
+        let inPoint = 0;
+        let outPoint = null;
+        let endHandled = false;   // OUT reached and dealt with (HOLD/ADV), until the next TAKE/seek/PLAY
+        // The operator pressed PAUSE (or stepped a frame). Dragging the scrub bar to the end of the file
+        // while paused makes the element 'ended'; that must not loop, advance or restart the cue.
+        let operatorPaused = false;
+
+        function usesPoints() { return inPoint > 0 || outPoint !== null; }
+        function activeEl() { return currentClip?.type === 'audio' ? aud : vid; }
+        // Where the cue ends: its OUT point, or the end of the file
+        function cueEnd(el) { return outPoint !== null ? outPoint : (el.duration || currentDuration); }
+
+        function applyPoints(clip) {
+            inPoint = Math.max(0, Number(clip.inPoint) || 0);
+            outPoint = (typeof clip.outPoint === 'number' && clip.outPoint > inPoint) ? clip.outPoint : null;
+            endHandled = false;
+            const loop = currentEndBehavior === 'loop' && !usesPoints();
+            vid.loop = loop && clip.type !== 'audio';
+            aud.loop = loop && clip.type === 'audio';
+        }
 
         // Heartbeat: tells main.js this page is alive. If it stops (page frozen), main restarts the output.
         setInterval(() => api?.heartbeat?.(), 1000);
@@ -185,7 +211,7 @@
         }
 
         function startAudioFadeOut(el) {
-            const timeLeft = Math.max(0.05, (el.duration || currentDuration) - el.currentTime);
+            const timeLeft = Math.max(0.05, cueEnd(el) - el.currentTime);
             rampActiveGain(0, timeLeft);
         }
 
@@ -194,7 +220,7 @@
         // them straight back to full if it has no fade-in.
         function undoFadeOutOnLoop(el) {
             fadeOutStarted = false;
-            const fadeLeft = currentFadeIn - el.currentTime;
+            const fadeLeft = currentFadeIn - (el.currentTime - inPoint);
             if (fadeLeft > 0.05) {
                 if (currentClip?.type === 'audio') {
                     fadeOverlay.style.transition = 'none';
@@ -215,11 +241,13 @@
             // A TAKE during a KILL fade cancels the pending KILL cleanup, so it can't blank the new clip
             if (killCleanupTimer) { clearTimeout(killCleanupTimer); killCleanupTimer = null; }
             currentClip = clip;
+            operatorPaused = false;
             fadeOutStarted = false;
             currentFadeOut = clip.fadeOut || 0;
             currentEndBehavior = clip.endBehavior || 'hold';
             const fadeIn = clip.fadeIn || 0;
             currentFadeIn = fadeIn;
+            applyPoints(clip);
             const rot = clip.rotation || 0;
 
             vid.pause();
@@ -251,8 +279,7 @@
                 aud.src = clip.url;
                 setGain(clip.gain, true);
                 if (fadeIn > 0) rampActiveGain(0, 0); // start silent; ramps up once playback starts
-                aud.loop = (clip.endBehavior === 'loop');
-                aud.currentTime = 0;
+                aud.currentTime = inPoint;
                 aud.play().then(() => {
                     if (fadeIn > 0 && currentClip === clip) setTimeout(() => { if (currentClip === clip) rampActiveGain(clipGainValue(), fadeIn); }, 50);
                 }).catch(err => {
@@ -263,10 +290,9 @@
                 vid.style.display = 'block';
                 vid.style.transform = `rotate(${rot}deg)`;
                 vid.src = clip.url;
-                vid.currentTime = 0;
+                vid.currentTime = inPoint;
                 vid.muted = false;
                 setGain(clip.gain, false);
-                vid.loop = (clip.endBehavior === 'loop');
 
                 if (fadeIn > 0) {
                     fadeOverlay.style.opacity = '1';
@@ -286,6 +312,95 @@
                     if (err.name !== 'AbortError') api.logError(`Output Video Playback Error: ${err.message}`);
                 });
             }
+        });
+
+        // OUTPUT turned on with a cue live: pick it up from the PGM monitor. A paused cue is simply shown
+        // at its frame. A playing cue is prerolled: it loads a point just ahead and waits, black and
+        // silent, for start-output, so it starts exactly as the PGM copy gets there.
+        const AUDIO_SWITCH_S = 0.04;
+
+        function fadeUpFromSilence(level, target, seconds) {
+            const node = activeGainNode();
+            if (!node || !audioCtx) return;
+            const now = audioCtx.currentTime;
+            node.gain.cancelScheduledValues(now);
+            node.gain.setValueAtTime(0, now);
+            node.gain.linearRampToValueAtTime(level, now + AUDIO_SWITCH_S);
+            if (seconds > 0) node.gain.linearRampToValueAtTime(target, now + AUDIO_SWITCH_S + seconds);
+        }
+
+        api?.onResumeVideo?.((state) => {
+            const { clip, position, paused, preroll, level, token } = state;
+            if (killCleanupTimer) { clearTimeout(killCleanupTimer); killCleanupTimer = null; }
+            currentClip = clip;
+            operatorPaused = state.operatorPaused;
+            currentFadeOut = clip.fadeOut || 0;
+            currentEndBehavior = clip.endBehavior || 'hold';
+            currentFadeIn = clip.fadeIn || 0;
+            applyPoints(clip);
+            endHandled = state.atEnd;
+            fadeOutStarted = false;
+            lastReportedTime = position;
+            fadeOverlay.style.transition = 'none';
+            fadeOverlay.style.opacity = preroll ? '1' : String(1 - level);
+
+            let confirmed = false;
+            const confirm = () => {
+                if (confirmed || currentClip !== clip) return;
+                confirmed = true;
+                api.outputResumed(token);
+            };
+            if (clip.type === 'image') {
+                img.style.display = 'block';
+                img.style.transform = `rotate(${clip.rotation || 0}deg)`;
+                img.src = clip.url;
+                confirm();
+                return;
+            }
+            const isAudio = clip.type === 'audio';
+            const el = isAudio ? aud : vid;
+            if (!isAudio) {
+                vid.style.display = 'block';
+                vid.style.transform = `rotate(${clip.rotation || 0}deg)`;
+                vid.muted = false;
+            }
+            setGain(clip.gain, isAudio);
+            rampActiveGain(preroll ? 0 : clipGainValue() * level, 0);
+            if (el.getAttribute('src') !== clip.url) el.src = clip.url;
+            el.pause();
+            el.currentTime = position;
+            el.addEventListener('canplay', confirm, { once: true });
+            el.addEventListener('seeked', confirm, { once: true });
+        });
+
+        // The PGM copy has reached the prerolled point: start, and let the operator know
+        api?.onStartOutput?.(({ level, fadeInLeft, fadingOut, token }) => {
+            const clip = currentClip;
+            if (!clip || clip.type === 'image') return;
+            const el = activeEl();
+            el.play().then(() => {
+                if (currentClip !== clip) return;
+                api.outputResumed(token);
+                fadeOverlay.style.transition = 'none';
+                fadeOverlay.style.opacity = String(1 - level);
+                void fadeOverlay.offsetWidth;
+                // Fresh fade state: while waiting ahead, a time update may have set off a fade-out
+                fadeOutStarted = fadingOut;
+                if (fadingOut) {
+                    const timeLeft = Math.max(0.05, cueEnd(el) - el.currentTime);
+                    fadeOverlay.style.transition = `opacity ${timeLeft}s linear`;
+                    fadeOverlay.style.opacity = '1';
+                    fadeUpFromSilence(clipGainValue() * level, 0, timeLeft);
+                } else if (fadeInLeft > 0) {
+                    fadeOverlay.style.transition = `opacity ${fadeInLeft}s ease`;
+                    fadeOverlay.style.opacity = '0';
+                    fadeUpFromSilence(clipGainValue() * level, clipGainValue(), fadeInLeft);
+                } else {
+                    fadeUpFromSilence(clipGainValue() * level, 0, 0);
+                }
+            }).catch(err => {
+                if (err.name !== 'AbortError') api.logError(`Output Resume Error: ${err.message}`);
+            });
         });
 
         // Media failure: drop the output to clean black and tell the operator which clip failed.
@@ -338,10 +453,11 @@
             if (fadeOutStarted && cur < lastReportedTime - 0.5) undoFadeOutOnLoop(vid);
             lastReportedTime = cur;
 
-            // Trigger linear fade-out overlay (picture and sound together)
+            // Trigger linear fade-out overlay (picture and sound together), ending at OUT (or the file end).
+            // Not when parked beyond OUT (scrubbed past it to move the points), or it would cut to black.
             if (currentFadeOut > 0 && currentDuration > 0) {
-                const timeLeft = currentDuration - cur;
-                if (timeLeft <= currentFadeOut && !fadeOutStarted) {
+                const timeLeft = cueEnd(vid) - cur;
+                if (timeLeft <= currentFadeOut && timeLeft > -0.1 && !fadeOutStarted) {
                     fadeOutStarted = true;
                     // Over the time actually left (like the sound), so the picture is fully black at the end
                     fadeOverlay.style.transition = `opacity ${Math.max(0.05, timeLeft)}s linear`;
@@ -360,8 +476,8 @@
             lastReportedTime = cur;
 
             if (currentFadeOut > 0 && currentDuration > 0) {
-                const timeLeft = currentDuration - cur;
-                if (timeLeft <= currentFadeOut && !fadeOutStarted) {
+                const timeLeft = cueEnd(aud) - cur;
+                if (timeLeft <= currentFadeOut && timeLeft > -0.1 && !fadeOutStarted) {
                     fadeOutStarted = true;
                     fadeOverlay.style.transition = `opacity ${Math.max(0.05, timeLeft)}s linear`;
                     fadeOverlay.style.opacity = '1';
@@ -370,31 +486,72 @@
             }
         });
 
-        // Trigger Auto-Advance on ended!
+        // Trigger Auto-Advance on ended! (unless the OUT watcher below already advanced at OUT)
         vid.addEventListener('ended', () => {
-            if (currentEndBehavior === 'advance') {
+            if (currentEndBehavior === 'advance' && !endHandled && !operatorPaused) {
+                endHandled = true;
                 api?.autoAdvance();
             }
         });
 
         aud.addEventListener('ended', () => {
-            if (currentEndBehavior === 'advance') {
+            if (currentEndBehavior === 'advance' && !endHandled && !operatorPaused) {
+                endHandled = true;
                 api?.autoAdvance();
             }
         });
 
+        // OUT point watcher (only for cues with points). timeupdate fires only ~4x a second, so the
+        // position is checked every 10 ms while playing. At OUT: LOOP jumps back to IN, HOLD freezes on
+        // the OUT frame, ADV pauses there and asks for the next cue. A LOOP cue with only an IN point
+        // also lands here at the end of the file, since the native loop would restart at 0.
+        setInterval(() => {
+            if (!currentClip || currentClip.type === 'image' || !usesPoints() || endHandled || operatorPaused) return;
+            const el = activeEl();
+            if (!el.getAttribute('src') || (el.paused && !el.ended)) return;
+            // Reached the real file end: HOLD / ADV are handled by 'ended' above, only LOOP needs us
+            if (el.ended && currentEndBehavior !== 'loop') return;
+            if (!el.ended && el.currentTime < cueEnd(el) - 0.005) return;
+
+            if (currentEndBehavior === 'loop') {
+                el.currentTime = inPoint;
+                lastReportedTime = inPoint;
+                if (fadeOutStarted) undoFadeOutOnLoop(el);
+                if (el.paused) el.play().catch(() => {});
+            } else if (outPoint !== null) {
+                endHandled = true;
+                el.pause();
+                el.currentTime = outPoint;
+                api?.sendTimeUpdate(outPoint, el.duration || currentDuration);
+                if (currentEndBehavior === 'advance') api?.autoAdvance();
+            }
+            // HOLD / ADV with only an IN point end at the file end as before ('ended' above)
+        }, 10);
+
         api?.onProgramCommand((command, value) => {
             if (command === 'play') {
                 const el = (currentClip?.type === 'audio') ? aud : vid;
+                // PLAY from (or past) OUT, or parked at the end of the file, starts the cue again from IN
+                // (left alone, the browser would restart an ended file from 0, not from IN)
+                if (usesPoints() && el.currentTime >= cueEnd(el) - 0.05) {
+                    el.currentTime = inPoint;
+                    fadeOutStarted = false;
+                    fadeOverlay.style.transition = 'none';
+                    fadeOverlay.style.opacity = '0';
+                    rampActiveGain(clipGainValue(), 0);
+                }
+                endHandled = false;
+                operatorPaused = false;
                 el.play();
                 // Pick up a fade (picture + sound) that was frozen by PAUSE
+                const intoCue = el.currentTime - inPoint;
                 if (fadeOutStarted) {
-                    const timeLeft = Math.max(0.05, (el.duration || currentDuration) - el.currentTime);
+                    const timeLeft = Math.max(0.05, cueEnd(el) - el.currentTime);
                     fadeOverlay.style.transition = `opacity ${timeLeft}s linear`;
                     fadeOverlay.style.opacity = '1';
                     startAudioFadeOut(el);
-                } else if (currentFadeIn > 0 && el.currentTime < currentFadeIn) {
-                    const fadeLeft = currentFadeIn - el.currentTime;
+                } else if (currentFadeIn > 0 && intoCue >= 0 && intoCue < currentFadeIn) {
+                    const fadeLeft = currentFadeIn - intoCue;
                     if (currentClip?.type !== 'audio') {
                         fadeOverlay.style.transition = `opacity ${fadeLeft}s ease`;
                         fadeOverlay.style.opacity = '0';
@@ -402,6 +559,7 @@
                     rampActiveGain(clipGainValue(), fadeLeft);
                 }
             } else if (command === 'pause') {
+                operatorPaused = true;
                 if (currentClip?.type === 'audio') aud.pause();
                 else vid.pause();
                 // Freeze any fade where it is, so picture and sound stay together
@@ -411,6 +569,7 @@
                 freezeActiveGain();
             } else if (command === 'seek' || command === 'goto-end') {
                 fadeOutStarted = false;
+                endHandled = false;
                 fadeOverlay.style.transition = 'none';
                 fadeOverlay.style.opacity = '0';
                 rampActiveGain(clipGainValue(), 0);
@@ -418,8 +577,17 @@
                 if (command === 'seek') {
                     el.currentTime = value;
                 } else if (command === 'goto-end') {
-                    el.currentTime = Math.max(0, (el.duration || currentDuration) - value);
+                    // GO TO 20 / 10: seconds before OUT (or the file end)
+                    el.currentTime = Math.max(0, cueEnd(el) - value);
                 }
+            } else if (command === 'audio-out') {
+                // The PGM monitor is taking over and this window is about to close
+                rampActiveGain(0, value);
+            } else if (command === 'set-points' && currentClip && value) {
+                // IN / OUT changed on the live cue: takes effect from here on (no jump)
+                currentClip.inPoint = value.inPoint;
+                currentClip.outPoint = value.outPoint;
+                applyPoints(currentClip);
             }
         });
 

@@ -1,5 +1,5 @@
 // ============================================================================
-// Playback Joe v10.20.2 - Main Process (Production & Secure)
+// Playback Joe - Main Process (Production & Secure)
 // Fixed: Context Isolation enabled, Preload Bridge, RFC file URLs, Safe IPC
 // ============================================================================
 
@@ -46,6 +46,30 @@ try {
     }
 } catch (err) {
     console.error('Failed to migrate legacy cuelist autosave:', err);
+}
+
+// App settings that outlast a session (OUTPUT on/off), kept next to the cuelist autosave in
+// userData/settings.json. A separate file, so last-cuelist.json stays a plain list of cues.
+const settingsPath = path.join(app.getPath('userData'), 'settings.json');
+
+function loadSettings() {
+    try {
+        const data = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+        return (data && typeof data === 'object') ? data : {};
+    } catch (err) {
+        return {};
+    }
+}
+
+function saveSettings(changes) {
+    try {
+        const tmpPath = settingsPath + '.tmp';
+        fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+        fs.writeFileSync(tmpPath, JSON.stringify({ ...loadSettings(), ...changes }, null, 2), 'utf-8');
+        fs.renameSync(tmpPath, settingsPath);
+    } catch (err) {
+        console.error('Failed to save settings:', err);
+    }
 }
 
 // Windowed output is locked to 16:9 (resize drags keep the ratio). Fullscreen is left free so the
@@ -199,7 +223,7 @@ function createOutputWindow() {
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
-            sandbox: false,
+            sandbox: true,
             // Keep timers (heartbeat, fades, time updates) running at full rate even if the output
             // is hidden behind other windows or minimized
             backgroundThrottling: false,
@@ -260,13 +284,18 @@ function createOutputWindow() {
         }
     });
 
-    win.webContents.on('did-finish-load', () => sendOutputStatus(win));
+    win.webContents.on('did-finish-load', () => {
+        sendOutputStatus(win);
+        // The page is listening now (the status above can also fire earlier, on entering fullscreen)
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('output-ready');
+    });
 }
 
 function createWindow() {
     const primaryDisplay = screen.getPrimaryDisplay();
 
-    createOutputWindow();
+    // OUTPUT comes back the way it was left (on unless it was switched off last session)
+    if (loadSettings().outputOpen !== false) createOutputWindow();
     watchDisplays();
 
     mainWindow = new BrowserWindow({
@@ -276,7 +305,7 @@ function createWindow() {
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
-            sandbox: false,
+            sandbox: true,
             preload: path.join(__dirname, 'preload.js')
         }
     });
@@ -295,6 +324,8 @@ function createWindow() {
     });
 
     mainWindow.loadFile(path.join(__dirname, 'index.html'));
+    // Tell the operator whether the output is open (it may have started switched off)
+    mainWindow.webContents.on('did-finish-load', () => sendOutputStatus(outputWindow));
 
     mainWindow.on('closed', () => {
         mainWindow = null;
@@ -322,30 +353,122 @@ app.on('activate', () => {
 });
 
 // ============================================================================
+// Input checks
+// ============================================================================
+// Cuelists can come from anyone's file, so a cue is rebuilt field by field before it is used or saved:
+// local media files only (no web addresses), known cue types, values inside the ranges the UI allows.
+const CUE_TYPES = ['video', 'audio', 'image'];
+const END_BEHAVIORS = ['hold', 'advance', 'loop'];
+const ROTATIONS = [0, 90, 180, 270];
+const PROGRAM_COMMANDS = ['play', 'pause', 'seek', 'goto-end', 'set-points'];
+const OUTPUT_AUDIO_OUT_S = 0.04; // the output's half of the crossfade when the PGM monitor takes over
+
+function numberInRange(value, min, max, fallback) {
+    return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
+}
+
+function isLocalFileUrl(url) {
+    if (typeof url !== 'string') return false;
+    try {
+        return new URL(url).protocol === 'file:';
+    } catch (err) {
+        return false;
+    }
+}
+
+// A cue's IN / OUT points (seconds), kept only when set and valid
+function cuePoints(c) {
+    const points = {};
+    if (Number.isFinite(c.inPoint) && c.inPoint > 0) points.inPoint = c.inPoint;
+    if (Number.isFinite(c.outPoint) && c.outPoint > (points.inPoint || 0)) points.outPoint = c.outPoint;
+    return points;
+}
+
+function cleanCue(c) {
+    if (!c || typeof c !== 'object') return null;
+    const originalName = c.originalName || c.name;
+    if (typeof originalName !== 'string' || !isLocalFileUrl(c.url) || !CUE_TYPES.includes(c.type)) return null;
+    return {
+        originalName: originalName.slice(0, 512),
+        url: c.url,
+        type: c.type,
+        gain: numberInRange(c.gain, 0, 3, 1.0),
+        fadeIn: numberInRange(c.fadeIn, 0, 5, 0.0),
+        fadeOut: numberInRange(c.fadeOut, 0, 5, 0.0),
+        rotation: ROTATIONS.includes(c.rotation) ? c.rotation : 0,
+        endBehavior: END_BEHAVIORS.includes(c.endBehavior) ? c.endBehavior : 'hold',
+        ...cuePoints(c),
+        format: typeof c.format === 'string' ? c.format.slice(0, 40) : undefined,
+        codec: typeof c.codec === 'string' ? c.codec.slice(0, 40) : undefined
+    };
+}
+
+// Cues read from a file: anything refused is reported in the operator's console
+function cleanLoadedCuelist(data, label) {
+    if (!Array.isArray(data)) {
+        notifyOperator(`${label}: NOT A CUELIST FILE. NOTHING LOADED.`);
+        return null;
+    }
+    const cues = data.map(cleanCue).filter(Boolean);
+    const skipped = data.length - cues.length;
+    if (skipped > 0) notifyOperator(`${label}: ${skipped} CUE(S) SKIPPED (NOT A VALID CUE OR NOT A LOCAL MEDIA FILE).`);
+    return cues;
+}
+
+function fromOperator(event) {
+    return !!mainWindow && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents;
+}
+
+function fromOutput(event) {
+    return !!outputWindow && !outputWindow.isDestroyed() && event.sender === outputWindow.webContents;
+}
+
+// ============================================================================
 // IPC Handlers - Coordinated Broadcast
 // ============================================================================
 
-ipcMain.on('toggle-output-window', () => {
-    // Turning the output on or off forces a kill without confirmation
-    if (outputWindow && !outputWindow.isDestroyed()) {
-        outputWindow.webContents.send('trigger-kill');
-    }
-    if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('execute-kill');
+ipcMain.handle('get-app-version', () => app.getVersion());
+
+ipcMain.on('toggle-output-window', (event, opts) => {
+    if (!fromOperator(event)) return;
+    // With nothing live, turning the output on or off forces a kill without confirmation.
+    // Off with a cue live ({ handoff: true }): the operator's PGM monitor has already taken over
+    // the picture and sound, so the output just closes and the operator is left playing.
+    // On with a cue live ({ handback: true }): no kill either; the PGM monitor keeps playing until
+    // the new output has picked the cue up (resume-output / output-resumed below).
+    const outputIsOpen = !!outputWindow && !outputWindow.isDestroyed();
+    const keepPlaying = !!opts && (outputIsOpen ? !!opts.handoff : !!opts.handback);
+    if (!keepPlaying) {
+        if (outputWindow && !outputWindow.isDestroyed()) {
+            outputWindow.webContents.send('trigger-kill');
+        }
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('execute-kill');
+        }
     }
 
     if (outputWindow && !outputWindow.isDestroyed()) {
-        outputWindow.close();
+        const closing = outputWindow;
         outputWindow = null;
+        if (keepPlaying) {
+            // The PGM monitor is fading up: fade the output's sound down, then close it (no cut)
+            closing.webContents.send('program-command', 'audio-out', OUTPUT_AUDIO_OUT_S);
+            setTimeout(() => { if (!closing.isDestroyed()) closing.close(); }, OUTPUT_AUDIO_OUT_S * 1000 + 20);
+        } else {
+            closing.close();
+        }
+        saveSettings({ outputOpen: false });
     } else {
         createOutputWindow();
+        saveSettings({ outputOpen: true });
     }
     if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.focus();
     }
 });
 
-ipcMain.on('toggle-fullscreen', () => {
+ipcMain.on('toggle-fullscreen', (event) => {
+    if (!fromOperator(event)) return;
     if (outputWindow && !outputWindow.isDestroyed()) {
         const isFS = outputWindow.isFullScreen();
         outputWindow.setFullScreen(!isFS);
@@ -357,24 +480,72 @@ ipcMain.on('toggle-fullscreen', () => {
 });
 
 ipcMain.on('cue-video', (event, clip) => {
+    if (!fromOperator(event)) return;
+    const cue = cleanCue(clip);
+    if (!cue) {
+        notifyOperator('TAKE REFUSED BY THE OUTPUT: NOT A VALID CUE OR NOT A LOCAL MEDIA FILE.');
+        return;
+    }
     if (outputWindow && !outputWindow.isDestroyed()) {
-        outputWindow.webContents.send('play-video', clip);
+        outputWindow.webContents.send('play-video', cue);
     }
     if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('mirror-program', clip);
+        mainWindow.webContents.send('mirror-program', cue);
+    }
+});
+
+// OUTPUT turned on with a cue live: the new output picks the cue up mid-way
+ipcMain.on('resume-output', (event, state) => {
+    if (!fromOperator(event) || !state) return;
+    const cue = cleanCue(state.clip);
+    if (!cue || !(Number.isFinite(state.position) && state.position >= 0)) return;
+    if (outputWindow && !outputWindow.isDestroyed()) {
+        outputWindow.webContents.send('resume-video', {
+            clip: cue,
+            position: state.position,
+            paused: !!state.paused,
+            preroll: !!state.preroll,
+            operatorPaused: !!state.operatorPaused,
+            atEnd: !!state.atEnd,
+            level: numberInRange(state.level, 0, 1, 1),
+            token: numberInRange(state.token, 0, Number.MAX_SAFE_INTEGER, 0)
+        });
+    }
+});
+
+ipcMain.on('start-output', (event, state) => {
+    if (!fromOperator(event) || !state) return;
+    if (outputWindow && !outputWindow.isDestroyed()) {
+        outputWindow.webContents.send('start-output', {
+            level: numberInRange(state.level, 0, 1, 1),
+            fadeInLeft: numberInRange(state.fadeInLeft, 0, 5, 0),
+            fadingOut: !!state.fadingOut,
+            token: numberInRange(state.token, 0, Number.MAX_SAFE_INTEGER, 0)
+        });
+    }
+});
+
+ipcMain.on('output-resumed', (event, token) => {
+    if (!fromOutput(event) || !Number.isFinite(token)) return;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('output-resumed', token);
     }
 });
 
 ipcMain.on('program-command', (event, command, value) => {
+    if (!fromOperator(event) || !PROGRAM_COMMANDS.includes(command)) return;
+    if ((command === 'seek' || command === 'goto-end') && !(Number.isFinite(value) && value >= 0)) return;
+    const payload = command === 'set-points' ? cuePoints(value || {}) : value;
     if (outputWindow && !outputWindow.isDestroyed()) {
-        outputWindow.webContents.send('program-command', command, value);
+        outputWindow.webContents.send('program-command', command, payload);
     }
     if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('mirror-command', command, value);
+        mainWindow.webContents.send('mirror-command', command, payload);
     }
 });
 
-ipcMain.on('trigger-kill', () => {
+ipcMain.on('trigger-kill', (event) => {
+    if (!fromOperator(event)) return;
     if (outputWindow && !outputWindow.isDestroyed()) {
         outputWindow.webContents.send('trigger-kill');
     }
@@ -383,37 +554,41 @@ ipcMain.on('trigger-kill', () => {
     }
 });
 
-ipcMain.on('auto-advance', () => {
+ipcMain.on('auto-advance', (event) => {
+    if (!fromOutput(event)) return;
     if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('auto-advance-next');
     }
 });
 
 ipcMain.on('program-timeupdate', (event, currentTime, duration) => {
+    if (!fromOutput(event) || !Number.isFinite(currentTime) || !Number.isFinite(duration)) return;
     if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('program-timeupdate', currentTime, duration);
     }
 });
 
 ipcMain.on('audio-level-update', (event, level) => {
+    if (!fromOutput(event) || !Number.isFinite(level)) return;
     if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('audio-level-update', level);
     }
 });
 
 ipcMain.on('output-media-error', (event, info) => {
-    if (!info || typeof info.url !== 'string') return;
+    if (!fromOutput(event) || !info || typeof info.url !== 'string') return;
     if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('program-media-error', {
             url: info.url,
-            message: String(info.message || 'UNKNOWN MEDIA ERROR')
+            message: String(info.message || 'UNKNOWN MEDIA ERROR').slice(0, 500)
         });
     }
 });
 
 ipcMain.on('log-error', (event, message) => {
+    if (!fromOutput(event)) return;
     if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('append-console-log', message);
+        mainWindow.webContents.send('append-console-log', String(message).slice(0, 500));
     }
 });
 
@@ -443,8 +618,9 @@ ipcMain.handle('dialog:openFile', async () => {
 });
 
 ipcMain.handle('dialog:saveCuelist', async (event, cuelist) => {
+    if (!fromOperator(event) || !Array.isArray(cuelist)) return false;
     const result = await dialog.showSaveDialog(mainWindow, {
-        title: 'Save Cuelist',
+        title: 'Export Cuelist',
         defaultPath: 'cuelist.json',
         filters: [{ name: 'JSON Files', extensions: ['json'] }]
     });
@@ -452,28 +628,18 @@ ipcMain.handle('dialog:saveCuelist', async (event, cuelist) => {
     if (result.canceled || !result.filePath) return false;
 
     try {
-        const cleanData = cuelist.map(c => ({
-            originalName: c.originalName || c.name,
-            url: c.url,
-            type: c.type,
-            gain: c.gain !== undefined ? c.gain : 1.0,
-            fadeIn: c.fadeIn !== undefined ? c.fadeIn : 0.0,
-            fadeOut: c.fadeOut !== undefined ? c.fadeOut : 0.0,
-            rotation: c.rotation || 0,
-            endBehavior: c.endBehavior || 'hold',
-            format: c.format,
-            codec: c.codec
-        }));
+        const cleanData = cuelist.map(cleanCue).filter(Boolean);
         fs.writeFileSync(result.filePath, JSON.stringify(cleanData, null, 2), 'utf-8');
         return true;
     } catch (err) {
-        console.error('Failed to save cuelist:', err);
+        console.error('Failed to export cuelist:', err);
         return false;
     }
 });
 
 ipcMain.handle('dialog:loadCuelist', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
+        title: 'Import Cuelist',
         properties: ['openFile'],
         filters: [{ name: 'JSON Files', extensions: ['json'] }]
     });
@@ -482,27 +648,18 @@ ipcMain.handle('dialog:loadCuelist', async () => {
 
     try {
         const data = fs.readFileSync(result.filePaths[0], 'utf-8');
-        return JSON.parse(data);
+        return cleanLoadedCuelist(JSON.parse(data), 'IMPORT');
     } catch (err) {
-        console.error('Failed to load cuelist:', err);
+        console.error('Failed to import cuelist:', err);
+        notifyOperator('IMPORT: THAT FILE COULD NOT BE READ AS A CUELIST.');
         return null;
     }
 });
 
 ipcMain.on('save-last-cuelist', (event, cuelist) => {
+    if (!fromOperator(event) || !Array.isArray(cuelist)) return;
     try {
-        const cleanData = cuelist.map(c => ({
-            originalName: c.originalName || c.name,
-            url: c.url,
-            type: c.type,
-            gain: c.gain !== undefined ? c.gain : 1.0,
-            fadeIn: c.fadeIn !== undefined ? c.fadeIn : 0.0,
-            fadeOut: c.fadeOut !== undefined ? c.fadeOut : 0.0,
-            rotation: c.rotation || 0,
-            endBehavior: c.endBehavior || 'hold',
-            format: c.format,
-            codec: c.codec
-        }));
+        const cleanData = cuelist.map(cleanCue).filter(Boolean);
         // Write to a temp file then rename, so a crash or power cut mid-write can't corrupt the autosave
         const tmpPath = cuelistSavePath + '.tmp';
         fs.writeFileSync(tmpPath, JSON.stringify(cleanData, null, 2), 'utf-8');
@@ -577,7 +734,7 @@ ipcMain.handle('load-last-cuelist', () => {
     try {
         if (fs.existsSync(cuelistSavePath)) {
             const data = fs.readFileSync(cuelistSavePath, 'utf-8');
-            return JSON.parse(data);
+            return cleanLoadedCuelist(JSON.parse(data), 'AUTOSAVE');
         }
         // No autosave at all means a clean install: start with the bundled test clips.
         // A cleared cuelist still autosaves as [], so it stays blank on the next launch.

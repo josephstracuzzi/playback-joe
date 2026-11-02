@@ -6,12 +6,18 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('playbackAPI', {
+    // The one version number (package.json), for titles and the header badge
+    getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+
     // Window Controls
-    toggleOutputWindow: () => ipcRenderer.send('toggle-output-window'),
+    toggleOutputWindow: (opts) => ipcRenderer.send('toggle-output-window', opts),
     toggleFullscreen: () => ipcRenderer.send('toggle-fullscreen'),
     
     // Playback Engine Commands
     cueVideo: (clip) => ipcRenderer.send('cue-video', clip),
+    resumeOutput: (state) => ipcRenderer.send('resume-output', state),
+    startOutput: (state) => ipcRenderer.send('start-output', state),
+    outputResumed: (token) => ipcRenderer.send('output-resumed', token),
     programCommand: (command, value) => ipcRenderer.send('program-command', command, value),
     triggerKill: () => ipcRenderer.send('trigger-kill'),
     autoAdvance: () => ipcRenderer.send('auto-advance'),
@@ -38,6 +44,26 @@ contextBridge.exposeInMainWorld('playbackAPI', {
         const handler = (event, clip) => callback(clip);
         ipcRenderer.on('play-video', handler);
         return () => ipcRenderer.removeListener('play-video', handler);
+    },
+    onOutputReady: (callback) => {
+        const handler = () => callback();
+        ipcRenderer.on('output-ready', handler);
+        return () => ipcRenderer.removeListener('output-ready', handler);
+    },
+    onOutputResumed: (callback) => {
+        const handler = (event, token) => callback(token);
+        ipcRenderer.on('output-resumed', handler);
+        return () => ipcRenderer.removeListener('output-resumed', handler);
+    },
+    onStartOutput: (callback) => {
+        const handler = (event, state) => callback(state);
+        ipcRenderer.on('start-output', handler);
+        return () => ipcRenderer.removeListener('start-output', handler);
+    },
+    onResumeVideo: (callback) => {
+        const handler = (event, state) => callback(state);
+        ipcRenderer.on('resume-video', handler);
+        return () => ipcRenderer.removeListener('resume-video', handler);
     },
     onMirrorProgram: (callback) => {
         const handler = (event, clip) => callback(clip);
