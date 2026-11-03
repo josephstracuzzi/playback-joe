@@ -482,8 +482,7 @@
 
     <div id="reset-points-modal-overlay" onclick="hideResetPointsModal()">
         <div class="focus-modal" style="border-color: var(--blue); color: #fff; cursor: default; width: 440px;" onclick="event.stopPropagation()">
-            <div style="font-size: 14px; margin-bottom: 12px; color: var(--blue); font-weight: bold; letter-spacing: 1px;">RESET IN / OUT</div>
-            <div id="reset-points-modal-text" style="font-size: 14px; font-weight: normal; line-height: 1.5; color: #ddd; margin-bottom: 24px; overflow-wrap: anywhere;"></div>
+            <div style="font-size: 14px; margin-bottom: 24px; color: var(--blue); font-weight: bold; letter-spacing: 1px;">RESET IN/OUT</div>
             <div style="display: flex; gap: 10px; justify-content: center;">
                 <button onclick="confirmResetPoints(); this.blur();" style="background: var(--blue); color: #fff; border: 1px solid var(--blue); padding: 8px 20px; font-size: 11px; font-weight: bold; border-radius: 3px; cursor: pointer; outline: none; text-transform: uppercase;">RESET</button>
                 <button onclick="hideResetPointsModal(); this.blur();" style="background: #222; color: #ccc; border: 1px solid #444; padding: 8px 20px; font-size: 11px; font-weight: bold; border-radius: 3px; cursor: pointer; outline: none; text-transform: uppercase;">CANCEL</button>
@@ -646,7 +645,7 @@
 
             <div class="transport-bar">
                 <button onclick="sendProgramCommand('play')">▶ PLAY</button>
-                <button onclick="sendProgramCommand('pause')">❚❚ PAUSE</button>
+                <button onclick="pauseProgram(); this.blur();">❚❚ PAUSE</button>
                 <button class="btn-goto" onclick="jumpToEnd(20)">GO TO 20</button>
                 <button class="btn-goto" onclick="jumpToEnd(10)">GO TO 10</button>
             </div>
@@ -1802,8 +1801,6 @@
             const clip = playlist[idx];
             if (!clip || !cueUsesPoints(clip)) return;
             cueToResetPoints = clip;
-            document.getElementById('reset-points-modal-text').textContent =
-                `Reset the IN / OUT points of cue ${String(idx + 1).padStart(2, '0')}, "${clip.name}"? It will play the whole file again.`;
             document.getElementById('reset-points-modal-overlay').style.display = 'flex';
         }
 
@@ -2475,6 +2472,19 @@
             };
             worker.src = clip.url;
             worker.currentTime = middleOf(clip, clip.duration);
+        }
+
+        // PAUSE with nothing live takes the selected video or audio cue and pauses it at once, so it can be
+        // scrubbed and given IN / OUT points without playing. The pause goes out right behind the TAKE, so
+        // the output's play() is cancelled before a frame or any sound comes out.
+        function pauseProgram() {
+            if (currentIndex === -1) {
+                const clip = playlist[stagedIndex === -1 ? 0 : stagedIndex];
+                if (!clip || clip.type === 'image') return;
+                executeTake();
+                if (currentIndex === -1) return; // TAKE refused (media error, PDF still loading)
+            }
+            sendProgramCommand('pause');
         }
 
         function scrubProgram(val) {
