@@ -2308,8 +2308,14 @@
                 prevVid.style.display = 'block';
                 prevVid.style.opacity = '1';
                 prevVid.style.transform = `rotate(${rot}deg)`;
+                // CUE monitor shows the frame halfway between the cue's IN and OUT (the clip's middle when it
+                // has no points), which says more about the clip than a first frame that may be black.
+                // The clip's length is known once its file has been read; until then wait for the video's own.
+                const showMiddle = dur => { prevVid.currentTime = cueIn(clip) + (cueOut(clip, dur) - cueIn(clip)) / 2; };
+                prevVid.onloadedmetadata = null;
                 prevVid.src = clip.url;
-                prevVid.currentTime = cueIn(clip);   // CUE monitor shows the cue's first frame (its IN point)
+                if (clip.duration > 0) showMiddle(clip.duration);
+                else prevVid.onloadedmetadata = () => { prevVid.onloadedmetadata = null; if (prevVid.duration > 0) showMiddle(prevVid.duration); };
                 prevVid.pause();
             }
         }
