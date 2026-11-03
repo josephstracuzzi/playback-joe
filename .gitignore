@@ -16,3 +16,6 @@ Desktop.ini
 
 # Private project notes for Claude Code (kept locally, not published)
 CLAUDE.md
+
+# Codec test clips (rebuilt by tools/make-codec-clips.ps1, not shipped)
+test-media/

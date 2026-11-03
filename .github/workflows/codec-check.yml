@@ -1,0 +1,47 @@
+# Builds the codec test clips and plays them in the app's Electron on macOS and Linux, to see which
+# formats work there. Run by hand (Actions > Codec check > Run workflow). Results are in the job log.
+# These are virtual machines without a real graphics card, so hardware-only codecs (HEVC) may differ
+# from a real computer.
+name: Codec check
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install ffmpeg
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then brew install ffmpeg > /dev/null; else sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg xvfb > /dev/null; fi
+          ffmpeg -hide_banner -version | head -n 1
+
+      - name: Make the clips
+        shell: pwsh
+        run: ./tools/make-codec-clips.ps1 -FFmpeg ffmpeg
+
+      - name: Play them in Electron
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run -a npx electron tools/probe-codecs.js test-media/codecs results.json --no-sandbox
+          else
+            npx electron tools/probe-codecs.js test-media/codecs results.json
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: codec-results-${{ matrix.os }}
+          path: results.json
