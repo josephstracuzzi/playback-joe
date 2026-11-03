@@ -432,7 +432,7 @@
             .shortcut-hint kbd { padding: 1px 3px; font-size: 10px; }
         }
         
-        .monitor-box video, .monitor-box img { width: 100%; height: 100%; object-fit: contain; opacity: 0; display: none; }
+        .monitor-box video, .monitor-box img, .monitor-box canvas { width: 100%; height: 100%; object-fit: contain; opacity: 0; display: none; }
     </style>
 </head>
 <body>
@@ -564,6 +564,7 @@
                 </div>
                 <div class="monitor-box">
                     <video id="preview-video" muted playsinline></video>
+                    <canvas id="preview-still"></canvas>
                     <img id="preview-image" />
                     <audio id="preview-audio"></audio>
                     <span id="preview-placeholder" class="monitor-placeholder">NO CLIP</span>
@@ -1675,6 +1676,7 @@
             // 0X0 (saved before 10.28.0) means the picture was never seen, so that cue is checked again
             if (!clip.mediaError && clip.durationStr && clip.durationStr !== 'LOADING...' && clip.resolution && clip.resolution !== '0X0') {
                 if (callback) callback();
+                schedulePreviewStills();
                 return;
             }
 
@@ -1701,6 +1703,7 @@
                 }
                 if (callback) callback();
                 renderPlaylist();
+                schedulePreviewStills();
             };
             vid.onerror = () => {
                 clip.mediaError = 'VIDEO FILE MISSING OR UNREADABLE';
@@ -1794,6 +1797,7 @@
                 stagedIndex = -1;
                 document.getElementById('preview-video').style.display = 'none';
                 document.getElementById('preview-image').style.display = 'none';
+                showPreviewStill(null);
                 document.getElementById('preview-audio').pause();
                 document.getElementById('preview-audio').src = '';
                 document.getElementById('preview-placeholder').style.display = 'block';
@@ -2009,6 +2013,7 @@
             triggerKill();
             document.getElementById('preview-video').style.display = 'none';
             document.getElementById('preview-image').style.display = 'none';
+            showPreviewStill(null);
             document.getElementById('preview-audio').pause();
             document.getElementById('preview-audio').src = '';
             document.getElementById('preview-placeholder').style.display = 'block';
@@ -2289,6 +2294,8 @@
 
             prevVid.style.display = 'none';
             prevImg.style.display = 'none';
+            showPreviewStill(null);
+            prevVid.onseeked = null;
             prevAud.pause();
             prevAud.src = '';
 
@@ -2305,19 +2312,123 @@
                     placeholder.style.display = 'block';
                 }
             } else {
+                // CUE monitor shows the frame halfway between the cue's IN and OUT (the clip's middle when it
+                // has no points), which says more about the clip than a first frame that may be black.
+                // A still of it made earlier is shown straight away; otherwise the video seeks there and the
+                // still is kept for next time.
+                const key = stillKey(clip);
+                const still = previewStills.get(key);
+                prevVid.onloadedmetadata = null;
+                if (still) {
+                    previewStills.delete(key);
+                    previewStills.set(key, still); // most recently used goes last
+                    prevVid.removeAttribute('src');
+                    prevVid.load();
+                    showPreviewStill(still, rot);
+                    return;
+                }
                 prevVid.style.display = 'block';
                 prevVid.style.opacity = '1';
                 prevVid.style.transform = `rotate(${rot}deg)`;
-                // CUE monitor shows the frame halfway between the cue's IN and OUT (the clip's middle when it
-                // has no points), which says more about the clip than a first frame that may be black.
-                // The clip's length is known once its file has been read; until then wait for the video's own.
-                const showMiddle = dur => { prevVid.currentTime = cueIn(clip) + (cueOut(clip, dur) - cueIn(clip)) / 2; };
-                prevVid.onloadedmetadata = null;
+                const showMiddle = dur => { prevVid.currentTime = middleOf(clip, dur); };
+                prevVid.onseeked = () => {
+                    prevVid.onseeked = null;
+                    if (playlist[stagedIndex] === clip && prevVid.videoWidth) makeStill(prevVid).then(b => keepStill(key, b)).catch(() => {});
+                };
                 prevVid.src = clip.url;
+                // The clip's length is known once its file has been read; until then wait for the video's own
                 if (clip.duration > 0) showMiddle(clip.duration);
                 else prevVid.onloadedmetadata = () => { prevVid.onloadedmetadata = null; if (prevVid.duration > 0) showMiddle(prevVid.duration); };
                 prevVid.pause();
             }
+        }
+
+        // ---- CUE monitor stills ----
+        // Showing a video's middle frame means decoding from the nearest keyframe, which takes about half a
+        // second on MP4s with few keyframes. So each video cue's middle frame is kept in memory as a small
+        // picture (never saved) and drawn straight into the CUE monitor. Stills are made in the background
+        // as cues load (ADD MEDIA, IMPORT, launch), one clip at a time and only while nothing is live; TAKE
+        // stops one in progress. The CUE monitor also keeps the still of a frame it had to seek to.
+        const STILL_WIDTH = 960, STILL_HEIGHT = 540;   // fitted inside, like the CUE monitor
+        const MAX_STILLS = 30;               // up to 2 MB each; the least recently shown are dropped
+        const previewStills = new Map();     // stillKey -> ImageBitmap, least recently used first
+        const failedStills = new Set();
+        let stillWorker = null;
+        let stillTimer = null;
+
+        function stillKey(clip) { return `${clip.url}|${cueIn(clip)}|${hasOutPoint(clip) ? clip.outPoint : ''}`; }
+        function middleOf(clip, dur) { return cueIn(clip) + (cueOut(clip, dur) - cueIn(clip)) / 2; }
+
+        // A file:// video would taint a canvas for reading, but an ImageBitmap can still be drawn for display
+        function makeStill(video) {
+            const scale = Math.min(STILL_WIDTH / video.videoWidth, STILL_HEIGHT / video.videoHeight, 1);
+            return createImageBitmap(video, {
+                resizeWidth: Math.max(1, Math.round(video.videoWidth * scale)),
+                resizeHeight: Math.max(1, Math.round(video.videoHeight * scale)),
+                resizeQuality: 'medium'
+            });
+        }
+
+        function keepStill(key, bitmap) {
+            previewStills.get(key)?.close();
+            previewStills.delete(key);
+            previewStills.set(key, bitmap);
+            while (previewStills.size > MAX_STILLS) {
+                const [oldKey, old] = previewStills.entries().next().value;
+                old.close();
+                previewStills.delete(oldKey);
+            }
+        }
+
+        function showPreviewStill(bitmap, rot = 0) {
+            const canvas = document.getElementById('preview-still');
+            if (!bitmap) { canvas.style.display = 'none'; return; }
+            canvas.width = bitmap.width;
+            canvas.height = bitmap.height;
+            canvas.getContext('2d').drawImage(bitmap, 0, 0);
+            canvas.style.transform = `rotate(${rot}deg)`;
+            canvas.style.opacity = '1';
+            canvas.style.display = 'block';
+        }
+
+        function schedulePreviewStills(delay = 300) {
+            clearTimeout(stillTimer);
+            stillTimer = setTimeout(makeNextStill, delay);
+        }
+
+        function stopPreviewStills() {
+            clearTimeout(stillTimer);
+            const worker = stillWorker;
+            stillWorker = null;
+            if (worker) { worker.onseeked = worker.onerror = null; worker.removeAttribute('src'); worker.load(); }
+        }
+
+        // Next cue without a still, starting from the one selected
+        function makeNextStill() {
+            if (stillWorker || currentIndex !== -1 || previewStills.size >= MAX_STILLS || playlist.length === 0) return;
+            const start = Math.max(0, stagedIndex);
+            const clip = playlist.map((_, i) => playlist[(start + i) % playlist.length]).find(c =>
+                c.type === 'video' && c.url && !c.mediaError && c.duration > 0 && !previewStills.has(stillKey(c)) && !failedStills.has(stillKey(c)));
+            if (!clip) return;
+            const key = stillKey(clip);
+            const worker = document.createElement('video');
+            worker.muted = true;
+            stillWorker = worker;
+            const finish = () => {
+                clearTimeout(giveUp);
+                if (stillWorker !== worker) return;   // stopped by TAKE
+                stopPreviewStills();
+                if (currentIndex === -1) schedulePreviewStills(100);
+            };
+            const giveUp = setTimeout(() => { failedStills.add(key); finish(); }, 10000);
+            worker.onerror = () => { failedStills.add(key); finish(); };
+            worker.onseeked = async () => {
+                try { if (worker.videoWidth && stillWorker === worker) keepStill(key, await makeStill(worker)); }
+                catch (e) { failedStills.add(key); }
+                finish();
+            };
+            worker.src = clip.url;
+            worker.currentTime = middleOf(clip, clip.duration);
         }
 
         function scrubProgram(val) {
@@ -2706,6 +2817,7 @@
                 renderPlaylist();
             }
             updatePointsUi();
+            schedulePreviewStills(2000);
         }
 
         // main.js echoes 'execute-kill' back the instant a KILL is sent. If this window started the KILL,
@@ -2732,6 +2844,8 @@
                 return;
             }
 
+            stopPreviewStills(); // no background decoding while a cue is live
+
             if (isKilling) {
                 if (killTimer) { clearTimeout(killTimer); killTimer = null; }
                 isKilling = false;
@@ -2748,6 +2862,7 @@
             if (prevVid) { prevVid.pause(); prevVid.src = ''; prevVid.style.display = 'none'; }
             if (prevAud) { prevAud.pause(); prevAud.src = ''; }
             if (prevImg) { prevImg.src = ''; prevImg.style.display = 'none'; }
+            showPreviewStill(null);
 
             currentIndex = stagedIndex;
             const clip = playlist[currentIndex];
