@@ -13,12 +13,14 @@ Get the latest version from the **[Releases page](https://github.com/josephstrac
 | System | Download | How to run |
 |---|---|---|
 | Windows 10 / 11 (64-bit) | `Playback Joe <version> Portable.exe` | Double-click it. |
-| Linux (x64) | `playback-joe-<version>.tar.gz` | Unpack it, run `chmod +x playback-joe` once, then start `./playback-joe`. |
+| Linux (x64) | `playback-joe-<version>.tar.gz` | Unpack it, then start `./playback-joe` from that folder. |
 | macOS 10.15 or later (experimental) | `Playback Joe <version> Mac Apple Silicon.zip` (M1 and newer) or `Playback Joe <version> Mac Intel.zip` | Unzip it and move **Playback Joe** to Applications. |
 
 The apps are not code-signed, so on first launch Windows SmartScreen says "Windows protected your PC". Click **More info → Run anyway**.
 
-On a Mac, the first time you open it macOS says it can't check the app. Go to **System Settings → Privacy & Security** and click **Open Anyway**. If macOS says the app "is damaged", run `xattr -cr "/Applications/Playback Joe.app"` in Terminal once. The Mac version is new and hasn't been tested at a show yet.
+On a Mac, the first time you open it macOS says it can't check the app. Go to **System Settings → Privacy & Security** and click **Open Anyway**. If macOS says the app "is damaged", run `xattr -cr "/Applications/Playback Joe.app"` in Terminal once. If the menu bar shows over the fullscreen output, go to **System Settings → Control Center** and set **Automatically hide and show the menu bar** to **In Full Screen Only** (on older macOS, tick **Automatically hide and show the menu bar in full screen** under **Dock & Menu Bar**). The Mac version is new and hasn't been tested at a show yet.
+
+On some Linux systems, Ubuntu 24.04 for example, the app stops at launch with a message about `chrome-sandbox`. Fix it once from the app's folder with `sudo chown root:root chrome-sandbox && sudo chmod 4755 chrome-sandbox`, or start it with `./playback-joe --no-sandbox` instead.
 
 Your settings, your autosaved cuelist and the starter clips are kept in your app-data folder (`%APPDATA%\playback-joe` on Windows, `~/.config/playback-joe` on Linux), so they stay put when you move or replace the app file.
 
