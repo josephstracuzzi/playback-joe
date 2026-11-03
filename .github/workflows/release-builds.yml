@@ -1,0 +1,146 @@
+# Builds the macOS apps (Apple Silicon and Intel) and the Linux tar.gz on GitHub's runners and attaches them
+# to the release. The Windows portable .exe is still built locally.
+# Runs when a release is published, or by hand for an existing tag (Actions > Release builds > Run workflow).
+# The Mac apps are signed ad hoc only (no Apple Developer certificate), so macOS asks users to approve them once.
+# Linux is built on Linux so its programs keep their executable permission (a Windows build loses it).
+name: Release builds
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build and attach to (for example v10.27.4)
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
+jobs:
+  mac:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Check the tag matches package.json
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          if [ "v$VERSION" != "$TAG" ]; then echo "Tag $TAG does not match package.json $VERSION"; exit 1; fi
+
+      - run: npm ci
+
+      - name: Build the apps
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: npx electron-builder --mac dir --x64 --arm64 -c.mac.identity=null
+
+      # Apple Silicon Macs refuse to run an app with no signature at all, so both get an ad hoc one
+      - name: Sign ad hoc and zip
+        run: |
+          for pair in "mac-arm64:Apple Silicon" "mac:Intel"; do
+            dir="${pair%%:*}"; label="${pair#*:}"
+            app="dist/$dir/Playback Joe.app"
+            codesign --force --deep --sign - "$app"
+            codesign --verify --deep --strict "$app"
+            ls "$app/Contents/Resources/test_clips"
+            ditto -c -k --sequesterRsrc --keepParent "$app" "dist/Playback Joe $VERSION Mac $label.zip"
+          done
+          ls -la dist/*.zip
+
+      - name: Launch the Apple Silicon app
+        run: |
+          "dist/mac-arm64/Playback Joe.app/Contents/MacOS/Playback Joe" --user-data-dir="$RUNNER_TEMP/pj" --remote-debugging-port=9223 &
+          pid=$!
+          for i in $(seq 1 40); do
+            curl -s http://127.0.0.1:9223/json > pages.json || true
+            if grep -q "PLAYBACK JOE $VERSION - OPERATOR" pages.json; then break; fi
+            sleep 1
+          done
+          cat pages.json
+          kill $pid || true
+          grep -q "PLAYBACK JOE $VERSION - OPERATOR" pages.json
+          grep -q "output.html" pages.json
+
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" dist/*.zip --clobber --repo "$GITHUB_REPOSITORY"
+
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Check the tag matches package.json
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          if [ "v$VERSION" != "$TAG" ]; then echo "Tag $TAG does not match package.json $VERSION"; exit 1; fi
+
+      - run: npm ci
+
+      - name: Build the tar.gz
+        run: npx electron-builder --linux tar.gz --x64
+
+      - name: Check what's inside
+        run: |
+          file="dist/playback-joe-$VERSION.tar.gz"
+          tar -tvzf "$file" | grep -E 'playback-joe$|chrome_crashpad_handler|chrome-sandbox|test_clips/'
+          for f in playback-joe chrome_crashpad_handler chrome-sandbox; do
+            tar -tvzf "$file" "playback-joe-$VERSION/$f" | grep -q '^-rwx' || { echo "$f is not executable"; exit 1; }
+          done
+
+      # The first try is how a user would start it. If the system blocks Electron's sandbox (as Ubuntu 24.04
+      # can), that is reported and the app is tried again with --no-sandbox so the rest still gets checked.
+      - name: Launch the app
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb > /dev/null
+          mkdir -p "$RUNNER_TEMP/run" && tar -xzf "dist/playback-joe-$VERSION.tar.gz" -C "$RUNNER_TEMP/run"
+          app="$RUNNER_TEMP/run/playback-joe-$VERSION/playback-joe"
+          try() {
+            rm -rf "$RUNNER_TEMP/pj" pages.json
+            xvfb-run -a "$app" --user-data-dir="$RUNNER_TEMP/pj" --remote-debugging-port=9223 "$@" > app.log 2>&1 &
+            for i in $(seq 1 40); do
+              curl -s http://127.0.0.1:9223/json > pages.json || true
+              if grep -q "PLAYBACK JOE $VERSION - OPERATOR" pages.json && grep -q "output.html" pages.json; then break; fi
+              sleep 1
+            done
+            pkill -f "playback-joe-$VERSION/playback-joe" || true
+            sleep 2
+            grep -q "PLAYBACK JOE $VERSION - OPERATOR" pages.json && grep -q "output.html" pages.json
+          }
+          if try; then
+            echo "::notice::Linux app started normally (no extra options needed)"
+          else
+            echo "First try failed. App output:"; tail -n 20 app.log
+            if try --no-sandbox; then
+              echo "::warning::Linux app only started with --no-sandbox on Ubuntu 24.04"
+            else
+              tail -n 40 app.log; exit 1
+            fi
+          fi
+          ls "$RUNNER_TEMP/pj/test_clips" || true
+
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" "dist/playback-joe-$VERSION.tar.gz" --clobber --repo "$GITHUB_REPOSITORY"
