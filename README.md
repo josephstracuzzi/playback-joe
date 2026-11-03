@@ -14,8 +14,11 @@ Get the latest version from the **[Releases page](https://github.com/josephstrac
 |---|---|---|
 | Windows 10 / 11 (64-bit) | `Playback Joe <version> Portable.exe` | Double-click it. |
 | Linux (x64) | `playback-joe-<version>.tar.gz` | Unpack it, run `chmod +x playback-joe` once, then start `./playback-joe`. |
+| macOS 10.15 or later (experimental) | `Playback Joe <version> Mac Apple Silicon.zip` (M1 and newer) or `Playback Joe <version> Mac Intel.zip` | Unzip it and move **Playback Joe** to Applications. |
 
 The apps are not code-signed, so on first launch Windows SmartScreen says "Windows protected your PC". Click **More info → Run anyway**.
+
+On a Mac, the first time you open it macOS says it can't check the app. Go to **System Settings → Privacy & Security** and click **Open Anyway**. If macOS says the app "is damaged", run `xattr -cr "/Applications/Playback Joe.app"` in Terminal once. The Mac version is new and hasn't been tested at a show yet.
 
 Your settings, your autosaved cuelist and the starter clips are kept in your app-data folder (`%APPDATA%\playback-joe` on Windows, `~/.config/playback-joe` on Linux), so they stay put when you move or replace the app file.
 
