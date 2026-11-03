@@ -482,9 +482,12 @@
 
     <div id="reset-points-modal-overlay" onclick="hideResetPointsModal()">
         <div class="focus-modal" style="border-color: var(--blue); color: #fff; cursor: default; width: 440px;" onclick="event.stopPropagation()">
-            <div style="font-size: 14px; margin-bottom: 24px; color: var(--blue); font-weight: bold; letter-spacing: 1px;">RESET IN/OUT</div>
+            <div style="font-size: 14px; margin-bottom: 12px; color: var(--blue); font-weight: bold; letter-spacing: 1px;">RESET IN/OUT</div>
+            <div style="font-size: 14px; font-weight: normal; line-height: 1.5; color: #ddd; margin-bottom: 24px;">
+                Are you sure you want to reset the IN/OUT points?
+            </div>
             <div style="display: flex; gap: 10px; justify-content: center;">
-                <button onclick="confirmResetPoints(); this.blur();" style="background: var(--blue); color: #fff; border: 1px solid var(--blue); padding: 8px 20px; font-size: 11px; font-weight: bold; border-radius: 3px; cursor: pointer; outline: none; text-transform: uppercase;">RESET</button>
+                <button onclick="confirmResetPoints(); this.blur();" style="background: rgba(2, 132, 199, 0.2); color: #fff; border: 1px solid var(--blue); padding: 8px 20px; font-size: 11px; font-weight: bold; border-radius: 3px; cursor: pointer; outline: none; text-transform: uppercase;">RESET</button>
                 <button onclick="hideResetPointsModal(); this.blur();" style="background: #222; color: #ccc; border: 1px solid #444; padding: 8px 20px; font-size: 11px; font-weight: bold; border-radius: 3px; cursor: pointer; outline: none; text-transform: uppercase;">CANCEL</button>
             </div>
         </div>
