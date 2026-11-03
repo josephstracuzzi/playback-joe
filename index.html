@@ -520,7 +520,7 @@
                     <button class="btn-action-text" onclick="saveCuelist()">EXPORT</button>
                     <button class="btn-add" onclick="addLocalMedia()">+ ADD MEDIA</button>
                 </div>
-                <div class="format-hint" title="ACCEPTED: MP4, M4V, WEBM, MOV, MP3, WAV, AAC, JPG, PNG, GIF, PDF">ACCEPTED: MP4, M4V, WEBM, MOV, MP3, WAV, AAC, JPG, PNG, GIF, PDF</div>
+                <div class="format-hint" title="ACCEPTED: MP4, M4V, MOV, WEBM, MP3, WAV, AAC, M4A, FLAC, OGG, JPG, PNG, GIF, WEBP, BMP, PDF. VIDEO: H.264, VP8, VP9 OR AV1 (HEVC ON SOME COMPUTERS). NOT PRORES, DNXHR OR MPEG-2.">ACCEPTED: MP4, M4V, MOV, WEBM, MP3, WAV, AAC, M4A, FLAC, OGG, JPG, PNG, GIF, WEBP, BMP, PDF</div>
             </div>
         </div>
 
@@ -1220,10 +1220,14 @@
             if (ext === 'mov') return 'ProRes / H.264';
             if (ext === 'mp3') return 'MPEG Layer 3';
             if (ext === 'wav') return 'Linear PCM 24-bit';
-            if (ext === 'aac') return 'AAC-LC';
+            if (ext === 'aac' || ext === 'm4a') return 'AAC-LC';
+            if (ext === 'flac') return 'FLAC';
+            if (ext === 'ogg') return 'Vorbis';
             if (['jpg', 'jpeg'].includes(ext)) return 'JPEG Baseline';
             if (ext === 'png') return 'PNG Truecolor';
             if (ext === 'gif') return 'GIF89a';
+            if (ext === 'webp') return 'WebP';
+            if (ext === 'bmp') return 'Bitmap';
             return type === 'image' ? 'Raster Graphic' : 'H.264 / AAC';
         }
 
@@ -1668,7 +1672,8 @@
                 return;
             }
 
-            if (!clip.mediaError && clip.durationStr && clip.durationStr !== 'LOADING...' && clip.resolution) {
+            // 0X0 (saved before 10.28.0) means the picture was never seen, so that cue is checked again
+            if (!clip.mediaError && clip.durationStr && clip.durationStr !== 'LOADING...' && clip.resolution && clip.resolution !== '0X0') {
                 if (callback) callback();
                 return;
             }
@@ -1677,11 +1682,23 @@
             clip.resolution = 'LOADING...';
             const vid = document.createElement('video');
             vid.src = clip.url;
-            vid.onloadedmetadata = () => {
-                delete clip.mediaError;
-                clip.resolution = `${vid.videoWidth}X${vid.videoHeight}`;
+            vid.onloadedmetadata = async () => {
                 clip.durationStr = formatTimecode(vid.duration);
                 clip.duration = vid.duration;
+                delete clip.mediaError;
+                if (vid.videoWidth > 0) {
+                    clip.resolution = `${vid.videoWidth}X${vid.videoHeight}`;
+                } else {
+                    // No picture size: either an audio-only file, or a video codec this computer can't
+                    // decode, which would play its sound over a black picture with no error
+                    const hasVideoTrack = await Promise.resolve(api.probeVideoTrack?.(clip.url)).catch(() => null);
+                    if (hasVideoTrack === true) {
+                        clip.mediaError = "PICTURE CAN'T BE PLAYED: VIDEO CODEC NOT SUPPORTED (FOR EXAMPLE PRORES, DNXHR, MPEG-2, OR HEVC ON THIS COMPUTER)";
+                        clip.resolution = 'NO PICTURE';
+                    } else {
+                        clip.resolution = 'AUDIO ONLY';
+                    }
+                }
                 if (callback) callback();
                 renderPlaylist();
             };

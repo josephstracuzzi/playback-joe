@@ -725,7 +725,7 @@ ipcMain.handle('dialog:openFile', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
         properties: ['openFile', 'multiSelections'],
         filters: [
-            { name: 'Media Files', extensions: ['mp4', 'm4v', 'webm', 'mov', 'mp3', 'wav', 'aac', 'jpg', 'jpeg', 'png', 'gif', 'pdf'] }
+            { name: 'Media Files', extensions: ['mp4', 'm4v', 'mov', 'webm', 'mp3', 'wav', 'aac', 'm4a', 'flac', 'ogg', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'pdf'] }
         ]
     });
 
@@ -734,8 +734,8 @@ ipcMain.handle('dialog:openFile', async () => {
     return result.filePaths.map(filePath => {
         const ext = path.extname(filePath).toLowerCase();
         let type = 'video';
-        if (['.mp3', '.wav', '.aac', '.ogg', '.flac'].includes(ext)) type = 'audio';
-        else if (['.jpg', '.jpeg', '.png', '.gif', '.webp', '.pdf'].includes(ext)) type = 'image';
+        if (['.mp3', '.wav', '.aac', '.m4a', '.ogg', '.flac'].includes(ext)) type = 'audio';
+        else if (['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.pdf'].includes(ext)) type = 'image';
 
         return {
             name: path.basename(filePath),
@@ -878,6 +878,79 @@ ipcMain.handle('read-pdf', (event, url) => {
     } catch (err) {
         console.error('Failed to read PDF:', err);
         return null;
+    }
+});
+
+// Does a video file hold a video track? A video whose picture codec can't be decoded (ProRes, DNxHR,
+// MPEG-2, and HEVC where the computer has no decoder) still loads and plays its sound with a black
+// picture and no error, so the operator asks here when a video cue loads with no picture size.
+// true = the file has a video track; false = it has none (an audio-only file); null = can't tell.
+// Only true makes the cue a media error, so a file this can't read is never blocked.
+function readBytes(fd, position, length) {
+    const buf = Buffer.alloc(length);
+    const n = fs.readSync(fd, buf, 0, length, position);
+    return buf.subarray(0, n);
+}
+
+// MP4 / M4V / MOV: find the moov box and look for a 'vide' handler (hdlr, then 8 bytes, then the type)
+function mp4HasVideoTrack(fd, size) {
+    let pos = 0;
+    for (let i = 0; i < 1000 && pos + 8 <= size; i++) {
+        const head = readBytes(fd, pos, 16);
+        if (head.length < 8) return null;
+        let boxSize = head.readUInt32BE(0);
+        const type = head.toString('latin1', 4, 8);
+        let headerSize = 8;
+        if (boxSize === 1) { boxSize = Number(head.readBigUInt64BE(8)); headerSize = 16; }
+        else if (boxSize === 0) boxSize = size - pos;
+        if (boxSize < headerSize) return null;
+        if (type === 'moov') {
+            const moov = readBytes(fd, pos, Math.min(boxSize, 64 * 1024 * 1024));
+            for (let at = moov.indexOf('hdlr'); at !== -1; at = moov.indexOf('hdlr', at + 4)) {
+                if (moov.toString('latin1', at + 12, at + 16) === 'vide') return true;
+            }
+            return false;
+        }
+        pos += boxSize;
+    }
+    return null;
+}
+
+// WebM: inside the Tracks element, a TrackType element (0x83) of 1 means a video track
+function webmHasVideoTrack(fd) {
+    const head = readBytes(fd, 0, 4 * 1024 * 1024);
+    const at = head.indexOf(Buffer.from([0x16, 0x54, 0xAE, 0x6B]));
+    if (at === -1) return null;
+    const first = head[at + 4];
+    if (first === undefined) return null;
+    let width = 1;
+    while (width <= 8 && !(first & (0x80 >> (width - 1)))) width++;
+    if (width > 8) return null;
+    let length = first & (0xFF >> width);
+    for (let i = 1; i < width; i++) length = length * 256 + head[at + 4 + i];
+    const start = at + 4 + width;
+    const tracks = head.subarray(start, Math.min(start + length, head.length));
+    for (let i = 0; i + 2 < tracks.length; i++) {
+        if (tracks[i] === 0x83 && tracks[i + 1] === 0x81 && tracks[i + 2] === 0x01) return true;
+    }
+    return false;
+}
+
+ipcMain.handle('probe-video-track', (event, url) => {
+    if (!fromOperator(event) || !isLocalFileUrl(url)) return null;
+    let fd;
+    try {
+        const file = fileURLToPath(url);
+        fd = fs.openSync(file, 'r');
+        const ext = path.extname(file).toLowerCase();
+        if (['.mp4', '.m4v', '.mov'].includes(ext)) return mp4HasVideoTrack(fd, fs.fstatSync(fd).size);
+        if (ext === '.webm') return webmHasVideoTrack(fd);
+        return null;
+    } catch (err) {
+        console.error('Failed to check the video track:', err);
+        return null;
+    } finally {
+        if (fd !== undefined) fs.closeSync(fd);
     }
 });
 

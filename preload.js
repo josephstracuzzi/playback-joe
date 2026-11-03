@@ -38,6 +38,7 @@ contextBridge.exposeInMainWorld('playbackAPI', {
     getStarterCues: () => ipcRenderer.invoke('get-starter-cues'),
     getPatternLogo: () => ipcRenderer.invoke('get-pattern-logo'),
     readPdf: (url) => ipcRenderer.invoke('read-pdf', url),
+    probeVideoTrack: (url) => ipcRenderer.invoke('probe-video-track', url),
     showPage: (url) => ipcRenderer.send('show-page', url),
     onShowPage: (callback) => {
         const handler = (event, url) => callback(url);

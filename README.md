@@ -34,7 +34,7 @@ Your settings, your autosaved cuelist and the starter clips are kept in your app
 - Plug in or unplug a projector mid-show and the output moves to the right screen without stopping playback.
 
 ### Cuelist
-- Add video, audio, images and PDFs: **MP4, M4V, WEBM, MOV, MP3, WAV, AAC, JPG, PNG, GIF, PDF**.
+- Add video, audio, images and PDFs: **MP4, M4V, MOV, WEBM, MP3, WAV, AAC, M4A, FLAC, OGG, JPG, PNG, GIF, WEBP, BMP, PDF**. See [Supported formats](#-supported-formats) for which codecs play.
 - Each cue shows its type, resolution, codec and running time.
 - Per-cue **end behaviour**: **HOLD** on the last frame, **LOOP**, or **ADV**ance to the next cue.
 - Per-cue **fade in and fade out** for both picture and sound.
@@ -52,6 +52,7 @@ Your settings, your autosaved cuelist and the starter clips are kept in your app
 
 ### Built for live use
 - If a media file is missing or won't play, the output cuts to black, the cue turns red and the problem is logged, instead of the show freezing.
+- A video whose picture can't be played on this computer (ProRes, for example) turns red when you add it, and TAKE won't put it on air, so it can't go out as sound over a black screen.
 - If the output window crashes or hangs, it is replaced automatically.
 - Switch **OUTPUT** off in the middle of a cue and the operator's PGM monitor takes over the picture and sound where the output left off. Switch it back on and the output picks the cue up again. OUTPUT on/off is remembered for the next launch.
 - Only one copy of the app runs at a time, so a double-click can't open a second set of windows.
@@ -86,6 +87,29 @@ A fresh install opens with three test cues made for Playback Joe:
 
 ---
 
+## 🎞️ Supported formats
+Tested with short clips in every format below, on Windows, macOS and Linux.
+
+**Video**
+
+| Codec | File types | Windows | macOS | Linux |
+|---|---|---|---|---|
+| H.264 (8-bit, 10-bit, 4:2:2, up to 4K) | MP4, M4V, MOV | ✅ | ✅ | ✅ |
+| VP9 (8-bit and 10-bit), VP8 | WEBM | ✅ | ✅ | ✅ |
+| AV1 | MP4, WEBM | ✅ | ✅ | ✅ |
+| HEVC / H.265 | MP4, MOV | ✅ on most PCs (needs hardware support) | ⚠️ depends on the Mac | ❌ |
+| ProRes, DNxHD / DNxHR, MJPEG, MPEG-2, MPEG-4 Part 2 | MOV, MP4 | ❌ | ❌ | ❌ |
+
+A video that can't be played is marked red with **MEDIA ERROR** as soon as you add it. To use it, convert it to H.264 MP4 first (with HandBrake or Shutter Encoder, for example).
+
+**Audio** (the same on every system)
+- ✅ AAC (AAC, M4A, or inside MP4 / MOV), MP3, WAV (16-bit, 24-bit, 32-bit float), FLAC, OGG Vorbis, and Opus or Vorbis in WEBM
+- ❌ AC3 / Dolby Digital (the picture plays but is silent), ALAC, AIFF
+
+**Images:** JPG, PNG, GIF (animated too), WEBP, BMP, and PDF pages.
+
+---
+
 ## 🛠️ Building from source (developers)
 You only need this if you want to change the code. Install [Node.js](https://nodejs.org/), then in the project folder:
 
@@ -95,3 +119,5 @@ npm start
 ```
 
 To make the portable apps yourself, run `npm run build:win` on Windows, `npm run build:linux` on Linux, or `npm run build:mac` on a Mac. The files go to the `dist/` folder.
+
+To check which formats play on a computer, build the test clips with `tools/make-codec-clips.ps1` (needs ffmpeg, and PowerShell 7 on macOS or Linux), then run `npx electron tools/probe-codecs.js test-media/codecs`.
