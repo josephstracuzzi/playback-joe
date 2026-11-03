@@ -45,7 +45,7 @@ Your settings, your autosaved cuelist and the starter clips are kept in your app
 ### Playback control
 - **TAKE** puts the selected cue on air. **KILL** fades picture and sound to black over a second.
 - **PLAY / PAUSE**, a scrub bar, and **GO TO 20 / GO TO 10** to jump to 20 or 10 seconds before the end for rehearsals.
-- **Frame-accurate IN / OUT points per cue**: step to a frame with ◀| |▶ and press **IN** or **OUT**. The cue then starts at IN and ends at OUT, and its fades, HOLD, ADV and LOOP all follow the points.
+- **Frame-accurate IN / OUT points per cue**: step to a frame with ◀| |▶ and press **IN** or **OUT**. The cue then starts at IN and ends at OUT, and its fades, HOLD, ADV and LOOP all follow the points. A trimmed cue shows its running time in blue; double-click it to clear the points.
 - Large **elapsed and remaining timecode** and an audio level meter.
 
 <img src="docs/feature-in-out.png" width="467" alt="Timecode panel with IN at 00:00:08, OUT at 00:00:45, and a blue strip under the scrub bar marking the range">
