@@ -2050,7 +2050,7 @@
         // + ADD MEDIA: a file from this computer, or a live source
         function openAddMediaMenu(anchor) {
             if (isCuelistLocked()) return;
-            openPickMenu(anchor, [['file', 'LOCAL FILE'], ['webcam', 'WEBCAM'], ['webpage', 'WEBPAGE'], ['webvideo', 'WEBVIDEO']], null, choice => {
+            openPickMenu(anchor, [['file', 'LOCAL'], ['webcam', 'WEBCAM'], ['webpage', 'WEBPAGE'], ['webvideo', 'WEBVIDEO']], null, choice => {
                 if (choice === 'file') addLocalMedia();
                 else addTestPattern(choice);
             });
