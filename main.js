@@ -336,7 +336,17 @@ function revealWindows() {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.focus();
 }
 
-function createOutputWindow({ reveal = false } = {}) {
+// A hand-back output (OUTPUT on mid-cue) opens see-through and only appears once it's showing the cue, playing
+// or paused, so the projector goes straight from what it showed while OUTPUT was off to the picture, with no
+// black in between. It appears anyway on TAKE, KILL or after 9 s, so it can't be left invisible.
+function showOutputNow(win, delayMs = 0) {
+    if (!win || win.isDestroyed() || !win.pjHidden) return;
+    win.pjHidden = false;
+    clearTimeout(win.pjHiddenTimer);
+    setTimeout(() => { if (!win.isDestroyed()) win.setOpacity(1); }, delayMs);
+}
+
+function createOutputWindow({ reveal = false, hidden = false } = {}) {
     const layout = getOutputLayout();
     const version = app.getVersion();
 
@@ -353,7 +363,7 @@ function createOutputWindow({ reveal = false } = {}) {
         maximizable: false,
         fullscreenable: false,
         enableLargerThanScreen: true, // macOS: lets it cover the menu bar's strip when filling a screen
-        show: !reveal, // at launch it appears with the console (launch reveal)
+        show: !reveal && !hidden, // at launch it appears with the console (launch reveal)
         ...layout.bounds,
         webPreferences: {
             nodeIntegration: false,
@@ -371,6 +381,12 @@ function createOutputWindow({ reveal = false } = {}) {
 
     const win = outputWindow;
     placeOutputWindow(win, layout.fullscreen, layout.fullscreen ? layout.display : layout.bounds);
+    if (hidden) {
+        win.pjHidden = true;
+        win.setOpacity(0);
+        win.showInactive();
+        win.pjHiddenTimer = setTimeout(() => showOutputNow(win), 9000);
+    }
     // Never maximized (a double-click on the drag area would otherwise do it); FULLSCREEN fills the screen.
     // In case Windows maximizes it anyway, put it straight back.
     win.on('maximize', () => win.unmaximize());
@@ -701,7 +717,7 @@ ipcMain.on('toggle-output-window', (event, opts) => {
         }
         saveSettings({ outputOpen: false });
     } else {
-        createOutputWindow();
+        createOutputWindow({ hidden: keepPlaying }); // a hand-back appears once it shows the cue
         saveSettings({ outputOpen: true });
     }
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -748,6 +764,7 @@ ipcMain.on('cue-video', (event, clip) => {
         return;
     }
     if (outputWindow && !outputWindow.isDestroyed()) {
+        showOutputNow(outputWindow);
         outputWindow.webContents.send('play-video', cue);
     }
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -761,6 +778,8 @@ ipcMain.on('resume-output', (event, state) => {
     const cue = cleanCue(state.clip);
     if (!cue || !cue.url || !(Number.isFinite(state.position) && state.position >= 0)) return;
     if (outputWindow && !outputWindow.isDestroyed()) {
+        // A playing cue appears when it starts (start-output); a paused one once it shows its frame (output-resumed)
+        outputWindow.pjAppearOn = state.preroll ? 'start' : 'resumed';
         outputWindow.webContents.send('resume-video', {
             clip: cue,
             position: state.position,
@@ -783,11 +802,13 @@ ipcMain.on('start-output', (event, state) => {
             fadingOut: !!state.fadingOut,
             token: numberInRange(state.token, 0, Number.MAX_SAFE_INTEGER, 0)
         });
+        showOutputNow(outputWindow, 60); // its first moving frame is on screen by then
     }
 });
 
 ipcMain.on('output-resumed', (event, token) => {
     if (!fromOutput(event) || !Number.isFinite(token)) return;
+    if (outputWindow && outputWindow.pjAppearOn === 'resumed') showOutputNow(outputWindow, 30);
     if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('output-resumed', token);
     }
@@ -816,6 +837,7 @@ ipcMain.on('program-command', (event, command, value) => {
 ipcMain.on('trigger-kill', (event) => {
     if (!fromOperator(event)) return;
     if (outputWindow && !outputWindow.isDestroyed()) {
+        showOutputNow(outputWindow);
         outputWindow.webContents.send('trigger-kill');
     }
     if (mainWindow && !mainWindow.isDestroyed()) {

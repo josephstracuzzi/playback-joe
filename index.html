@@ -990,6 +990,7 @@
         let handBackPhase = '';            // 'preroll' (output loading ahead) or 'final' (output has the cue)
         let handBackPreroll = HAND_BACK_PREROLL_S;
         let handBackTarget = 0;
+        let killedDuringHandBack = false;  // a KILL stopped the hand-back; executeKill finishes it
 
         function clearHandBack() {
             if (handBackTimer) clearTimeout(handBackTimer);
@@ -2837,6 +2838,9 @@
             }
             // With the output closed the PGM monitor is the real sound, so fade it out with the picture
             if (!isOutputWindowOpen) rampLocalAudio(0, 1);
+            // KILL during a hand-back: stop it now, so an output still loading isn't sent the cue after the KILL
+            // (that would cancel its clean-up and leave a frozen frame). executeKill finishes it off.
+            if (handBackTimer) { clearHandBack(); killedDuringHandBack = true; }
 
             ipcRenderer.send('trigger-kill');
 
@@ -2849,7 +2853,8 @@
         function executeKill() {
             if (killTimer) { clearTimeout(killTimer); killTimer = null; }
             isKilling = false;
-            if (handBackTimer) finishHandBack(false); // nothing left to hand over; the output is open
+            // Nothing left to hand over; the output is open
+            if (handBackTimer || killedDuringHandBack) { killedDuringHandBack = false; finishHandBack(false); }
             setProgramAudioIndicator(null);
 
             const progVid = document.getElementById('program-video');
