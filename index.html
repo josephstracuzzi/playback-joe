@@ -978,7 +978,9 @@
         // the picture and sound until then, so there is no gap. If the output doesn't get there in time,
         // it closes again and the PGM monitor carries on.
         const HAND_BACK_TIMEOUT_MS = 8000;
-        const HAND_BACK_PREROLL_S = 1;     // how far ahead the output waits (doubled if it wasn't ready in time)
+        // How far ahead the output waits, black, before it takes over (doubled if it wasn't ready in time). The
+        // output is ready about 0.2 s after it opens on the dev PC; 1 s here meant over a second of black.
+        const HAND_BACK_PREROLL_S = 0.4;
         const HAND_BACK_PREROLL_MAX_S = 3;
         const HAND_BACK_START_S = 0.005;   // the output takes about this long to start after the message
         let handBackTimer = null;
