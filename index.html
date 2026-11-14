@@ -1518,7 +1518,13 @@
             };
             renderWebcamModal();
             document.getElementById('webcam-modal-overlay').style.display = 'flex';
+            // Reading device names opens the camera and mic for a moment (can take a second or two), so it starts
+            // now, and CAMERA / SOUND open their list straight away when clicked
+            webcamDeviceList = PlaybackWebcam.listDevices().catch(() => ({ cameras: [], mics: [] }));
         }
+
+        let webcamDeviceList = null;   // the device list being read for the open popup (a promise)
+        let webcamPickPending = false; // a CAMERA / SOUND click waiting for it: more clicks are ignored
 
         function renderWebcamModal() {
             const w = webcamDraft.webcam;
@@ -1531,8 +1537,17 @@
 
         // The device lists open the camera and microphone once (to read their names), so they're fetched on click
         async function pickWebcamDevice(kind, anchor) {
-            if (!webcamDraft) return;
-            const { cameras, mics } = await PlaybackWebcam.listDevices();
+            if (!webcamDraft || webcamPickPending) return;
+            webcamPickPending = true;
+            let list;
+            try {
+                list = await (webcamDeviceList || (webcamDeviceList = PlaybackWebcam.listDevices()));
+            } catch (err) {
+                list = { cameras: [], mics: [] };
+            } finally {
+                webcamPickPending = false;
+            }
+            const { cameras, mics } = list;
             if (!webcamDraft) return;
             const w = webcamDraft.webcam;
             if (kind === 'camera') {
@@ -1559,6 +1574,7 @@
         function hideWebcamModal() {
             webcamModalClip = null;
             webcamDraft = null;
+            webcamDeviceList = null; // read again next time (a camera may have been plugged in)
             closePickMenu();
             document.getElementById('webcam-modal-overlay').style.display = 'none';
         }
