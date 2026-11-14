@@ -37,6 +37,12 @@ contextBridge.exposeInMainWorld('playbackAPI', {
     heartbeat: () => ipcRenderer.send('output-heartbeat'),
     setWebAudio: (audio) => ipcRenderer.send('web-audio', audio),
     setWebPages: (urls) => ipcRenderer.send('set-web-pages', urls),
+    webVideoInfo: (info) => ipcRenderer.send('web-video-info', info),
+    onWebVideoInfo: (callback) => {
+        const handler = (event, info) => callback(info);
+        ipcRenderer.on('web-video-info', handler);
+        return () => ipcRenderer.removeListener('web-video-info', handler);
+    },
     onWebPages: (callback) => {
         const handler = (event, urls) => callback(urls);
         ipcRenderer.on('web-pages', handler);

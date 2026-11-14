@@ -59,6 +59,7 @@
 
     <script src="clock.js"></script>
     <script src="webcam.js"></script>
+    <script src="webvideo.js"></script>
     <script>
         // Supports both contextBridge (window.playbackAPI) and legacy fallback
         const api = window.playbackAPI || (typeof require !== 'undefined' ? {
@@ -487,15 +488,18 @@
             }, 50);
         }
 
-        function createWebPage(url) {
+        function createWebPage(url, video) {
             const el = document.createElement('webview');
             el.className = 'web-page';
             el.setAttribute('partition', 'persist:webpage');
             // Lets main.js see "open in a new window" links, which it opens in place instead (never a window)
             el.setAttribute('allowpopups', '');
-            const page = { url, el, ready: false, failed: null, waiters: [] };
+            // YouTube's player refuses to play with no referring page (error 153): it's told the app's own page
+            if (video && /^https:\/\/www\.youtube\.com\//.test(url)) el.setAttribute('httpreferrer', 'https://github.com/josephstracuzzi/playback-joe');
+            const page = { url, el, video: !!video, ready: false, failed: null, waiters: [] };
             el.addEventListener('dom-ready', () => {
                 page.failed = null;
+                if (page.video) prepareWebVideo(page);
                 if (page.ready) return;
                 page.ready = true;
                 page.waiters.splice(0).forEach(f => f());
@@ -520,16 +524,171 @@
         }
 
         // The console's list of web cue addresses: new ones start loading, unused ones close (not the one on air)
-        api?.onWebPages?.((urls) => {
-            wantedWebPages = new Set(Array.isArray(urls) ? urls : []);
-            wantedWebPages.forEach(url => { if (!webPages.has(url)) createWebPage(url); });
+        api?.onWebPages?.((pages) => {
+            const list = Array.isArray(pages) ? pages : [];
+            wantedWebPages = new Set(list.map(p => p.url));
+            list.forEach(p => { if (!webPages.has(p.url)) createWebPage(p.url, p.video); });
             webPages.forEach(page => { if (!wantedWebPages.has(page.url) && page.el !== webEl) removeWebPage(page); });
         });
+
+        // ---- WEB VIDEO cues (webvideo.js) ----
+        // A web video's player page is one of the pages above (video: true): parked paused off air, played on air,
+        // driven through the small controller webvideo.js puts in it (window.__pjv). Polled 10x a second on air
+        // for the console's timecode, the fade-out and the end (HOLD / ADV / LOOP).
+        function wvRun(el, code) {
+            return el.executeJavaScript(`(() => { ${PlaybackWebVideo.CONTROLLER}; return (${code}); })()`).catch(() => null);
+        }
+
+        // Each time a video page loads: put the controller in, park it paused (a direct file link starts by
+        // itself), then read its title and length for the console (or the reason it can't play)
+        function prepareWebVideo(page) {
+            const el = page.el;
+            const parked = () => webEl !== el;
+            wvRun(el, `(${parked()} && __pjv.pause(), true)`);
+            let tries = 0;
+            const probe = async () => {
+                if (!webPages.has(page.url) || page.el !== el) return;
+                const s = await wvRun(el, '__pjv.status()');
+                if (s && webEl !== el && s.playing) wvRun(el, '__pjv.pause()');
+                if (s && (s.error || s.d > 0)) {
+                    api?.webVideoInfo?.({ url: page.url, title: s.title || '', duration: s.d || 0, error: s.error || '' });
+                    return;
+                }
+                if (++tries < 60) setTimeout(probe, 500);
+            };
+            setTimeout(probe, 300);
+        }
+
+        let wvTimer = null;
+        let wvLastReport = 0;
+
+        function stopWebVideoWatch() {
+            clearInterval(wvTimer);
+            wvTimer = null;
+        }
+
+        function isWebVideoClip(clip) { return clip?.type === 'webvideo'; }
+
+        function webVideoFadeOut(timeLeft) {
+            fadeOutStarted = true;
+            fadeOverlay.style.transition = `opacity ${Math.max(0.05, timeLeft)}s linear`;
+            fadeOverlay.style.opacity = '1';
+            rampWebVolume(0, Math.max(0.05, timeLeft));
+        }
+
+        function undoWebVideoFade(clip) {
+            fadeOutStarted = false;
+            fadeOverlay.style.transition = 'none';
+            fadeOverlay.style.opacity = '0';
+            rampWebVolume(webGain(clip), 0);
+        }
+
+        function watchWebVideo(clip) {
+            stopWebVideoWatch();
+            const el = webEl;
+            let busy = false;
+            wvTimer = setInterval(async () => {
+                if (busy || currentClip !== clip || webEl !== el) return;
+                busy = true;
+                const s = await wvRun(el, '__pjv.status()');
+                busy = false;
+                if (!s || currentClip !== clip || webEl !== el) return;
+                if (s.error) { failToBlack(clip.url, `WEB VIDEO CAN'T BE PLAYED: ${s.error.toUpperCase()}`); return; }
+                if (s.d > 0) currentDuration = s.d;
+                if (performance.now() - wvLastReport >= 240) {
+                    wvLastReport = performance.now();
+                    api?.sendTimeUpdate(s.t, s.d);
+                }
+                if (operatorPaused || endHandled || !(s.d > 0)) return;
+                const timeLeft = s.d - s.t;
+                if (currentFadeOut > 0 && !fadeOutStarted && s.playing && timeLeft <= currentFadeOut + 0.5 && timeLeft > 0.5) webVideoFadeOut(timeLeft - 0.5);
+                // Caught just before the end, so the site's own end screen never shows
+                if (s.ended || (s.playing && timeLeft <= 0.5)) {
+                    if (currentEndBehavior === 'loop') {
+                        wvRun(el, '(__pjv.seek(0), __pjv.play(), true)');
+                        undoWebVideoFade(clip);
+                    } else {
+                        endHandled = true;
+                        wvRun(el, '__pjv.pause()');
+                        api?.sendTimeUpdate(s.d, s.d);
+                        if (currentEndBehavior === 'advance') api?.autoAdvance();
+                    }
+                }
+            }, 100);
+        }
+
+        // Starts (or picks up) the cue on the page: at `position` (null = where it is), playing or paused.
+        // `onShowing` runs once there's a picture to show (playing, or parked on its frame), or after 10 s.
+        function playWebVideo(clip, position, paused, onShowing) {
+            const el = webEl;
+            wvRun(el, `(__pjv.volume(1), ${position === null ? '' : `__pjv.seek(${Number(position) || 0}),`} ${paused ? '__pjv.pause()' : '__pjv.play()'}, true)`);
+            const started = performance.now();
+            let done = false;
+            const check = async () => {
+                if (done || currentClip !== clip || webEl !== el) return;
+                const s = await wvRun(el, '__pjv.status()');
+                if (currentClip !== clip || webEl !== el) return;
+                if (s && s.error) { failToBlack(clip.url, `WEB VIDEO CAN'T BE PLAYED: ${s.error.toUpperCase()}`); return; }
+                // PAUSE pressed straight after TAKE (PAUSE with nothing live): show it parked
+                if (operatorPaused) paused = true;
+                const showing = s && (paused ? s.ready : s.playing);
+                if (showing || performance.now() - started > 10000) {
+                    done = true;
+                    if (!paused && s && !s.playing) wvRun(el, '__pjv.play()');
+                    onShowing?.();
+                    return;
+                }
+                // YouTube can need asking again once its player is up
+                if (!paused && s && s.ready && s.paused) wvRun(el, '__pjv.play()');
+                setTimeout(check, 40);
+            };
+            check();
+            watchWebVideo(clip);
+        }
+
+        function webVideoCommand(command, value) {
+            const clip = currentClip;
+            const el = webEl;
+            if (!el) return;
+            if (command === 'play') {
+                const fromTop = endHandled;
+                if (fromTop) {
+                    wvRun(el, '__pjv.seek(0)');
+                    undoWebVideoFade(clip);
+                }
+                endHandled = false;
+                operatorPaused = false;
+                wvRun(el, '__pjv.play()');
+                // A fade frozen by PAUSE carries on
+                if (!fromTop && fadeOutStarted) {
+                    wvRun(el, '__pjv.status()').then(s => { if (s && currentClip === clip) webVideoFadeOut(s.d - s.t); });
+                } else if (!fromTop && currentFadeIn > 0 && getComputedStyle(fadeOverlay).opacity !== '0') {
+                    fadeOverlay.style.transition = `opacity ${currentFadeIn}s ease`;
+                    fadeOverlay.style.opacity = '0';
+                    rampWebVolume(webGain(clip), currentFadeIn);
+                }
+            } else if (command === 'pause') {
+                operatorPaused = true;
+                wvRun(el, '__pjv.pause()');
+                const frozenOpacity = getComputedStyle(fadeOverlay).opacity;
+                fadeOverlay.style.transition = 'none';
+                fadeOverlay.style.opacity = frozenOpacity;
+                clearInterval(webRampTimer);
+                webRampTimer = null;
+            } else if (command === 'seek' || command === 'goto-end') {
+                endHandled = false;
+                undoWebVideoFade(clip);
+                const target = command === 'seek' ? value : Math.max(0, currentDuration - value);
+                wvRun(el, `__pjv.seek(${Number(target) || 0})`);
+                api?.sendTimeUpdate(Number(target) || 0, currentDuration);
+            }
+        }
 
         // Off air: hidden and muted, still running
         function stopWeb() {
             clearInterval(webRampTimer);
             webRampTimer = null;
+            stopWebVideoWatch();
             webVol = 0;
             if (!webEl) return;
             const el = webEl;
@@ -538,12 +697,14 @@
             const id = webContentsId(el);
             if (id) api?.setWebAudio?.({ id, v: 0, on: false });
             const page = [...webPages.values()].find(p => p.el === el);
+            if (page?.video) wvRun(el, '__pjv.pause()'); // a web video waits, paused, where it was
             if (page && !wantedWebPages.has(page.url)) removeWebPage(page);
         }
 
         function startWeb(clip, onShowing) {
             stopWeb();
-            let page = webPages.get(clip.web.url) || createWebPage(clip.web.url);
+            const url = clip.web ? clip.web.url : clip.url;
+            let page = webPages.get(url) || createWebPage(url, clip.type === 'webvideo');
             if (page.failed) {
                 // Try a page that failed again (a network that's back, say)
                 page.failed = null;
@@ -594,6 +755,20 @@
                         fadeOverlay.style.opacity = '0';
                     }, 50);
                 }
+            } else if (clip.type === 'webvideo') {
+                // Black until it plays, then its fade-in (picture and sound). RESTART goes back to the top.
+                currentDuration = clip.webvideo.duration || 0;
+                api.sendTimeUpdate(0, currentDuration);
+                fadeOverlay.style.opacity = '1';
+                startWeb(clip, () => {
+                    if (currentClip !== clip) return;
+                    playWebVideo(clip, clip.webvideo.start === 'restart' ? 0 : null, false, () => {
+                        if (currentClip !== clip) return;
+                        fadeOverlay.style.transition = fadeIn > 0 ? `opacity ${fadeIn}s ease` : 'none';
+                        fadeOverlay.style.opacity = '0';
+                        rampWebVolume(webGain(clip), fadeIn);
+                    });
+                });
             } else if (clip.web) {
                 currentDuration = 0;
                 api.sendTimeUpdate(0, 0);
@@ -710,6 +885,18 @@
             stopClock();
             stopWebcam();
             stopWeb();
+            if (clip.type === 'webvideo') {
+                // The new output's page loads, then picks up at the PGM's position, playing or paused
+                startWeb(clip, () => {
+                    if (currentClip !== clip) return;
+                    playWebVideo(clip, position, paused, () => {
+                        if (currentClip !== clip) return;
+                        setWebVolume(webGain(clip) * (Number.isFinite(level) ? level : 1));
+                        confirm();
+                    });
+                });
+                return;
+            }
             if (clip.web) {
                 // The page loads afresh (anything scrolled or clicked on it before starts over)
                 startWeb(clip, () => {
@@ -937,6 +1124,10 @@
         api?.onProgramCommand((command, value) => {
             if (currentClip?.type === 'clock') {
                 clockCommand(command, value);
+                return;
+            }
+            if (isWebVideoClip(currentClip)) {
+                webVideoCommand(command, value);
                 return;
             }
             if (command === 'play') {

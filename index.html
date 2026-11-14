@@ -378,6 +378,9 @@
         .badge.active-loop { background: #d97706; color: #fff; border-color: #d97706; }
         .badge.active-rot { background: #7c3aed; color: #fff; border-color: #8b5cf6; }
         .badge .badge-icon { width: 10px; height: 10px; display: block; margin: 0 auto; fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+        /* A web video's RESTART / RESUME: always set one way or the other, so lit neutral, shown as an icon */
+        .badge.start-toggle { background: #2a2a2a; color: #e5e5e5; border-color: #4a4a4a; }
+        .badge .badge-icon.is-filled { fill: currentColor; stroke: none; }
         .badge.disabled { background: #161616; color: #444; border-color: #222; cursor: default; }    
         .badge:disabled { opacity: 0.4; cursor: not-allowed; }
         .badge.badge-fixed { cursor: default; }
@@ -551,13 +554,15 @@
     <!-- WEBPAGE cue address. Enter in the field is DONE; the buttons blur, so Enter / Esc stay TAKE / KILL. -->
     <div id="web-modal-overlay" onclick="hideWebModal()">
         <div class="focus-modal clock-modal" onclick="event.stopPropagation()">
-            <div class="clock-modal-title">WEBPAGE</div>
+            <div class="clock-modal-title" id="web-modal-title">WEBPAGE</div>
             <div class="clock-form">
-                <div class="clock-row"><span class="clock-label">ADDRESS</span>
+                <div class="clock-row"><span class="clock-label" id="web-modal-label">ADDRESS</span>
                     <input type="text" id="web-url" class="clock-input web-url" maxlength="4000" spellcheck="false" placeholder="EXAMPLE.COM OR A LOCAL FILE" onkeydown="if (event.key === 'Enter') { event.preventDefault(); confirmWebModal(); }"></div>
-                <div class="clock-row"><span class="clock-label"></span>
+                <div class="clock-row" id="web-modal-file-row"><span class="clock-label"></span>
                     <button class="clock-choice" onclick="chooseWebFile(); this.blur();">LOCAL FILE...</button></div>
-                <div class="clock-row"><span class="clock-label"></span>
+                <div class="clock-row" id="web-modal-video-hint" style="display: none;"><span class="clock-label"></span>
+                    <span class="web-hint">A YOUTUBE OR VIMEO LINK, OR A LINK TO A VIDEO FILE (MP4, MOV, WEBM). IT LOADS ON THE OUTPUT AS SOON AS IT'S ADDED, PLAYS ON AIR AND PAUSES OFF AIR. THE SITE'S ADS, IF ANY, STILL PLAY.</span></div>
+                <div class="clock-row" id="web-modal-page-hint"><span class="clock-label"></span>
                     <span class="web-hint">THE PAGE RUNS ON THE OUTPUT FROM THE MOMENT IT'S ADDED (HIDDEN AND MUTED OFF AIR), AND CAN BE CLICKED, SCROLLED AND MADE FULLSCREEN THERE. THE CUE AND PGM MONITORS SHOW ITS ADDRESS ONLY.</span></div>
             </div>
             <div style="display: flex; gap: 10px; justify-content: center;">
@@ -743,6 +748,7 @@
 
     <script src="clock.js"></script>
     <script src="webcam.js"></script>
+    <script src="webvideo.js"></script>
     <script>
         const rawIpc = (typeof require !== 'undefined') ? require('electron').ipcRenderer : null;
         const api = window.playbackAPI || {
@@ -1027,6 +1033,8 @@
             if (isClock(clip)) {
                 // The PGM clock is already running in step: line it up with the output's last report
                 if (!programPausedByOperator && !programClock.ended && Math.abs(programClock.elapsed - programReportedTime) > 0.3) programClock.seek(programReportedTime);
+            } else if (isWebVideo(clip)) {
+                // Nothing plays here: the video waits at the output's last position for OUTPUT on
             } else if (isWebcam(clip)) {
                 // The PGM camera is already live: its SOUND input rises while the output's falls
                 initLocalMeter();
@@ -1129,6 +1137,12 @@
                 state.duration = programClock.duration;
                 state.atEnd = programClock.ended;
                 state.paused = programPausedByOperator || programClock.ended;
+            } else if (isWebVideo(clip)) {
+                // The new output's player page picks up where the last one was (no preroll: it has to load)
+                const holdBadge = document.getElementById('pgm-hold-badge');
+                state.atEnd = !!holdBadge && holdBadge.style.display === 'inline-block';
+                state.position = programReportedTime;
+                state.paused = programPausedByOperator || state.atEnd;
             } else if (clip.type !== 'image') {
                 const el = liveProgramEl(clip);
                 const holdBadge = document.getElementById('pgm-hold-badge');
@@ -1308,6 +1322,10 @@
         const audioSvg = `<svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>`;
         const clockSvg = `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><polyline points="12 7 12 12 15.5 14"></polyline></svg>`;
         const webcamSvg = `<svg viewBox="0 0 24 24"><circle cx="12" cy="10" r="7"></circle><circle cx="12" cy="10" r="2.5"></circle><path d="M8 20h8M12 17v3"></path></svg>`;
+        // RESTART (back to the start) and RESUME (play / pause: carries on) on a web video cue
+        const restartSvg = `<svg class="badge-icon is-filled" viewBox="0 0 24 24" aria-label="RESTART"><rect x="3" y="4" width="3.5" height="16"></rect><polygon points="21 4 8 12 21 20"></polygon></svg>`;
+        const resumeSvg = `<svg class="badge-icon is-filled" viewBox="0 0 24 24" aria-label="RESUME"><polygon points="2 4 13 12 2 20"></polygon><rect x="15" y="4" width="3" height="16"></rect><rect x="20" y="4" width="3" height="16"></rect></svg>`;
+        const webVideoSvg = `<svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="3" ry="3"></rect><polygon points="10 9 15 12 10 15 10 9"></polygon></svg>`;
         const webSvg = `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9s1.3-6.4 3.8-9z"></path></svg>`;
 
         // CLOCK cues on the CUE and PGM monitors. The PGM copy keeps the same time as the output's (same
@@ -1442,6 +1460,61 @@
             saveStateToLocalStorage();
         }
 
+        // WEB VIDEO cues (webvideo.js): type 'webvideo', played on the output's player page and driven from the
+        // transport like a video cue. The console shows YouTube's still (others their address) and takes the
+        // timecode from the output; with the output off nothing plays (it picks up where it was on OUTPUT on).
+        function isWebVideo(clip) { return clip?.type === 'webvideo'; }
+
+        function applyWebVideoToCue(clip) {
+            const w = clip.webvideo;
+            clip.url = PlaybackWebVideo.playerUrl(w);
+            const label = PlaybackWebVideo.kindLabel(w);
+            clip.name = w.title ? `${label} - ${w.title}` : `${label} - ${webAddress(w.link)}`;
+            clip.originalName = clip.name;
+            clip.format = label;
+            clip.codec = 'WEB';
+            clip.resolution = 'STREAM';
+            clip.duration = w.duration || 0;
+            clip.durationStr = w.duration > 0 ? formatTimecode(w.duration) : 'WEB';
+            clip.rotation = 0;
+            clip.gain = Math.max(0, Math.min(1, clip.gain ?? 1));
+            delete clip.inPoint;
+            delete clip.outPoint;
+        }
+
+        function toggleWebVideoStart(idx) {
+            const clip = playlist[idx];
+            if (!isWebVideo(clip) || idx === currentIndex) return;
+            clip.webvideo = { ...clip.webvideo, start: clip.webvideo.start === 'restart' ? 'resume' : 'restart' };
+            renderPlaylist();
+            saveStateToLocalStorage();
+        }
+
+        // The output read a web video's title and length (or found it won't play)
+        api.onWebVideoInfo?.(info => {
+            let changed = false;
+            playlist.forEach(clip => {
+                if (!isWebVideo(clip) || clip.url !== info.url) return;
+                if (info.error) {
+                    const msg = `WEB VIDEO CAN'T BE PLAYED: ${info.error.toUpperCase()}`;
+                    if (clip.mediaError !== msg) { clip.mediaError = msg; changed = true; }
+                    return;
+                }
+                if (clip.mediaError) { delete clip.mediaError; changed = true; }
+                if ((info.title && info.title !== clip.webvideo.title) || (info.duration > 0 && Math.abs(info.duration - (clip.webvideo.duration || 0)) > 0.5)) {
+                    clip.webvideo = { ...clip.webvideo, title: info.title || clip.webvideo.title, duration: info.duration || clip.webvideo.duration };
+                    applyWebVideoToCue(clip);
+                    changed = true;
+                }
+            });
+            if (!changed) return;
+            renderPlaylist();
+            if (stagedIndex !== -1 && isWebVideo(playlist[stagedIndex]) && playlist[stagedIndex].url === info.url && currentIndex !== stagedIndex) {
+                document.getElementById('cue-title-text').innerText = `CUE: ${playlist[stagedIndex].name}`;
+            }
+            saveStateToLocalStorage();
+        });
+
         // WEBPAGE cues: an image cue with `web` = { url }. The page runs on the output only (main.js locks it
         // down); the CUE and PGM monitors show its address, so nothing heavy runs twice.
         function isWeb(clip) { return !!clip?.web; }
@@ -1473,14 +1546,29 @@
 
         // What the console's monitors show for a page (it plays on the output only)
         function webMonitorText(clip, onProgram) {
-            if (onProgram && !isOutputWindowOpen) return `WEBPAGE: ${webAddress(clip.url)}\nTURN OUTPUT ON TO SHOW IT`;
-            return `WEBPAGE${onProgram ? ' ON THE OUTPUT' : ''}: ${webAddress(clip.url)}`;
+            const what = isWebVideo(clip) ? PlaybackWebVideo.kindLabel(clip.webvideo) : 'WEBPAGE';
+            const address = isWebVideo(clip) ? (clip.webvideo.title || webAddress(clip.webvideo.link)) : webAddress(clip.url);
+            if (onProgram && !isOutputWindowOpen) return `${what}: ${address}\nTURN OUTPUT ON TO ${isWebVideo(clip) ? 'PLAY' : 'SHOW'} IT`;
+            return `${what}${onProgram ? ' ON THE OUTPUT' : ''}: ${address}`;
         }
 
+        // The PGM monitor for a live page or web video: YouTube's still, or the address (always the address
+        // while the output is off, as nothing plays then)
         function showProgramWebPlaceholder() {
             const clip = playlist[currentIndex];
             const placeholder = document.getElementById('program-placeholder');
-            if (!isWeb(clip) || !placeholder || isKilling) return;
+            if (!(isWeb(clip) || isWebVideo(clip)) || !placeholder || isKilling) return;
+            const thumb = isWebVideo(clip) ? PlaybackWebVideo.thumbnailUrl(clip.webvideo) : '';
+            const progImg = document.getElementById('program-image');
+            if (thumb && isOutputWindowOpen) {
+                progImg.style.display = 'block';
+                progImg.style.opacity = '1';
+                progImg.style.transform = 'none';
+                if (progImg.getAttribute('src') !== thumb) progImg.src = thumb;
+                placeholder.style.display = 'none';
+                return;
+            }
+            if (thumb) { progImg.style.display = 'none'; }
             placeholder.innerText = webMonitorText(clip, true);
             placeholder.classList.remove('is-error');
             placeholder.style.display = 'block';
@@ -1502,15 +1590,23 @@
         // The address popup: for a new WEBPAGE cue (webModalClip null) or an existing one
         let webModalClip = null;
         let webModalOpen = false;
+        let webModalVideo = false; // the same popup adds WEB VIDEO cues (a link instead of a page)
 
-        function openWebModal(idx) {
-            const clip = idx === undefined ? null : playlist[idx];
-            if (clip && (!isWeb(clip) || idx === currentIndex)) return;
+        function openWebModal(idx, video) {
+            const clip = idx === undefined || idx === null ? null : playlist[idx];
+            if (clip && (!(isWeb(clip) || isWebVideo(clip)) || idx === currentIndex)) return;
             if (!clip && isCuelistLocked()) return;
             webModalClip = clip;
             webModalOpen = true;
+            webModalVideo = clip ? isWebVideo(clip) : !!video;
+            document.getElementById('web-modal-title').textContent = webModalVideo ? 'WEB VIDEO' : 'WEBPAGE';
+            document.getElementById('web-modal-label').textContent = webModalVideo ? 'LINK' : 'ADDRESS';
+            document.getElementById('web-modal-file-row').style.display = webModalVideo ? 'none' : '';
+            document.getElementById('web-modal-page-hint').style.display = webModalVideo ? 'none' : '';
+            document.getElementById('web-modal-video-hint').style.display = webModalVideo ? '' : 'none';
             const input = document.getElementById('web-url');
-            input.value = clip ? clip.web.url : '';
+            input.placeholder = webModalVideo ? 'YOUTUBE, VIMEO OR VIDEO FILE LINK' : 'EXAMPLE.COM OR A LOCAL FILE';
+            input.value = clip ? (webModalVideo ? clip.webvideo.link : clip.web.url) : '';
             document.getElementById('web-modal-overlay').style.display = 'flex';
             input.focus();
             input.select();
@@ -1529,7 +1625,33 @@
             if (url && webModalOpen) document.getElementById('web-url').value = url;
         }
 
+        function confirmWebVideoModal() {
+            const parsed = PlaybackWebVideo.parseLink(document.getElementById('web-url').value);
+            if (!parsed) {
+                appendConsoleLog('WEB VIDEO: PASTE A YOUTUBE OR VIMEO LINK, OR A LINK TO A VIDEO FILE (MP4, M4V, MOV, WEBM).');
+                document.getElementById('web-url').focus();
+                return;
+            }
+            const clip = webModalClip;
+            hideWebModal();
+            if (clip) {
+                if (!playlist.includes(clip) || playlist.indexOf(clip) === currentIndex) return;
+                clip.webvideo = { ...parsed, start: clip.webvideo.start, title: '', duration: 0 };
+                applyWebVideoToCue(clip);
+                delete clip.mediaError;
+                renderPlaylist();
+                if (playlist[stagedIndex] === clip) selectClip(stagedIndex);
+                saveStateToLocalStorage();
+                return;
+            }
+            if (isCuelistLocked()) return;
+            const cue = { type: 'webvideo', gain: 1.0, fadeIn: 0.0, fadeOut: 0.0, rotation: 0, endBehavior: 'hold', webvideo: { ...parsed, start: 'resume', title: '', duration: 0 } };
+            applyWebVideoToCue(cue);
+            finishAddingCue(cue);
+        }
+
         function confirmWebModal() {
+            if (webModalVideo) { confirmWebVideoModal(); return; }
             const url = normaliseWebUrl(document.getElementById('web-url').value);
             if (!url) {
                 appendConsoleLog('WEBPAGE: ENTER A WEB ADDRESS (HTTP OR HTTPS) OR CHOOSE A LOCAL .HTML FILE.');
@@ -1549,7 +1671,8 @@
                 return;
             }
             if (isCuelistLocked()) return;
-            const cue = { type: 'image', gain: 1.0, fadeIn: 0.0, fadeOut: 0.0, rotation: 0, endBehavior: 'hold', web: { url } };
+            // A page's sound starts off (fader down): most pages are shown for their picture, and some autoplay
+            const cue = { type: 'image', gain: 0, fadeIn: 0.0, fadeOut: 0.0, rotation: 0, endBehavior: 'hold', web: { url } };
             applyWebToCue(cue);
             finishAddingCue(cue);
         }
@@ -1811,8 +1934,8 @@
                 finishAddingCue(clip);
                 return;
             }
-            if (choice === 'webpage') {
-                openWebModal();
+            if (choice === 'webpage' || choice === 'webvideo') {
+                openWebModal(null, choice === 'webvideo');
                 return;
             }
             if (choice === 'webcam') {
@@ -1881,7 +2004,7 @@
 
         function openPatternMenu(anchor) {
             if (isCuelistLocked()) return;
-            openPickMenu(anchor, [['grid', 'GRID'], ['sync', 'SYNC TEST'], ['generator', 'GENERATOR'], ['clock', 'CLOCK'], ['webcam', 'WEBCAM'], ['webpage', 'WEBPAGE']], null, addTestPattern);
+            openPickMenu(anchor, [['grid', 'GRID'], ['sync', 'SYNC TEST'], ['generator', 'GENERATOR'], ['clock', 'CLOCK'], ['webcam', 'WEBCAM'], ['webpage', 'WEBPAGE'], ['webvideo', 'WEB VIDEO']], null, addTestPattern);
         }
 
         function openClockModeMenu(idx, anchor) {
@@ -2157,6 +2280,13 @@
                 preparePdfCue(clip, callback);
                 return;
             }
+            if (isWebVideo(clip)) {
+                // Checked by the output as its player page loads (web-video-info): title, length, or why not
+                applyWebVideoToCue(clip);
+                if (callback) callback();
+                renderPlaylist();
+                return;
+            }
             if (isWeb(clip)) {
                 // Nothing to check ahead: a page that won't load turns the cue red when it's taken
                 applyWebToCue(clip);
@@ -2249,11 +2379,15 @@
         // The output keeps each web cue's page running (hidden off air): tell it whenever the list changes
         let lastWebPages = null;
         function syncWebPages() {
-            const urls = [...new Set(playlist.filter(isWeb).map(c => c.web.url))];
-            const key = JSON.stringify(urls);
+            const pages = [];
+            playlist.forEach(c => {
+                const url = isWeb(c) ? c.web.url : isWebVideo(c) ? c.url : null;
+                if (url && !pages.some(p => p.url === url)) pages.push({ url, video: isWebVideo(c) });
+            });
+            const key = JSON.stringify(pages);
             if (key === lastWebPages) return;
             lastWebPages = key;
-            api.setWebPages?.(urls);
+            api.setWebPages?.(pages);
         }
 
         function saveStateToLocalStorage() {
@@ -2268,6 +2402,7 @@
                     clock: c.clock,
                     webcam: c.webcam,
                     web: c.web,
+                    webvideo: c.webvideo,
                     type: c.type,
                     gain: c.gain !== undefined ? c.gain : 1.0,
                     fadeIn: c.fadeIn !== undefined ? c.fadeIn : 0.0,
@@ -2449,6 +2584,7 @@
                 if (isClock(clip)) iconHtml = clockSvg;
                 if (isWebcam(clip)) iconHtml = webcamSvg;
                 if (isWeb(clip)) iconHtml = webSvg;
+                if (isWebVideo(clip)) iconHtml = webVideoSvg;
 
                 const isBoosted = clip.gain > 1.0;
                 const cueNumStr = (idx + 1).toString().padStart(2, '0');
@@ -2479,7 +2615,10 @@
                             <button class="badge ${clip.endBehavior === 'hold' ? 'active-hold' : ''}" ${isLive ? 'disabled' : ''} onclick="setClipBehavior(${idx}, 'hold')">HOLD</button>
                             <button class="badge ${clip.endBehavior === 'advance' ? 'active-advance' : ''}" ${isLive ? 'disabled' : ''} onclick="setClipBehavior(${idx}, 'advance')">ADV</button>
                             <button class="badge ${clip.endBehavior === 'loop' ? 'active-loop' : ''}" ${isLive ? 'disabled' : ''} onclick="setClipBehavior(${idx}, 'loop')">LOOP</button>
-                            <button class="badge ${rotVal > 0 ? 'active-rot' : ''}" ${isLive ? 'disabled' : ''} onclick="cycleClipRotation(${idx})" title="ROTATION: ${rotVal}° (CLICK TO TURN 90°)">${rotVal > 0 ? `${rotVal}°` : rotateSvg}</button>
+                            ${isWebVideo(clip)
+                                // A web video has no rotation: its slot says where a TAKE starts it
+                                ? `<button class="badge start-toggle" ${isLive ? 'disabled' : ''} onclick="toggleWebVideoStart(${idx}); this.blur();" title="${clip.webvideo.start === 'restart' ? 'RESTART' : 'RESUME'}">${clip.webvideo.start === 'restart' ? restartSvg : resumeSvg}</button>`
+                                : `<button class="badge ${rotVal > 0 ? 'active-rot' : ''}" ${isLive ? 'disabled' : ''} onclick="cycleClipRotation(${idx})" title="ROTATION: ${rotVal}° (CLICK TO TURN 90°)">${rotVal > 0 ? `${rotVal}°` : rotateSvg}</button>`}
                         </div>
                     `;
                 } else if (isWeb(clip)) {
@@ -2663,7 +2802,7 @@
             let pos = parseInt(faderPos, 10);
             const inputEl = document.getElementById(`vol-input-${idx}`);
             // A web page's volume is set on the page itself, which stops at 100%: its fader can't pass the centre
-            if (Math.abs(pos - 100) <= VOL_DETENT || (isWeb(playlist[idx]) && pos > 100)) {
+            if (Math.abs(pos - 100) <= VOL_DETENT || ((isWeb(playlist[idx]) || isWebVideo(playlist[idx])) && pos > 100)) {
                 pos = 100;
                 if (inputEl) inputEl.value = 100;
             }
@@ -2930,6 +3069,18 @@
                 else if (placeholder) { placeholder.innerText = clip.mediaError; placeholder.style.display = 'block'; }
             } else if (isWeb(clip)) {
                 if (placeholder) { placeholder.innerText = webMonitorText(clip, false); placeholder.style.display = 'block'; }
+            } else if (isWebVideo(clip)) {
+                // YouTube's still; the others show their link (the video itself runs on the output only)
+                const thumb = PlaybackWebVideo.thumbnailUrl(clip.webvideo);
+                if (thumb) {
+                    prevImg.style.display = 'block';
+                    prevImg.style.opacity = '1';
+                    prevImg.style.transform = 'none';
+                    prevImg.src = thumb;
+                } else if (placeholder) {
+                    placeholder.innerText = webMonitorText(clip, false);
+                    placeholder.style.display = 'block';
+                }
             } else if (clip.type === 'image') {
                 prevImg.style.display = 'block';
                 prevImg.style.opacity = '1';
@@ -3136,7 +3287,7 @@
         function stepProgramFrame(dir) {
             if (currentIndex === -1 || isKilling) return;
             const clip = playlist[currentIndex];
-            if (!clip || clip.type === 'image' || isClock(clip) || currentProgramDuration <= 0) return;
+            if (!clip || clip.type === 'image' || isClock(clip) || isWebVideo(clip) || currentProgramDuration <= 0) return;
             const el = clip.type === 'audio' ? document.getElementById('program-audio') : document.getElementById('program-video');
             // Always PAUSE (harmless if already paused): with the output open the operator's local copy
             // of an audio cue never plays, so its paused flag says nothing about the real program.
@@ -3176,7 +3327,7 @@
         function setCuePoint(which) {
             if (currentIndex === -1 || isKilling) return;
             const clip = playlist[currentIndex];
-            if (!clip || clip.type === 'image' || isClock(clip) || currentProgramDuration <= 0) return;
+            if (!clip || clip.type === 'image' || isClock(clip) || isWebVideo(clip) || currentProgramDuration <= 0) return;
             const fd = frameDurByUrl.get(clip.url) || DEFAULT_FRAME_DUR;
             // The middle of the frame on screen, the same spot the frame step buttons land on
             const pos = programPosition(liveProgramEl(clip));
@@ -3243,7 +3394,7 @@
         // IN / OUT buttons (lit when set, time on the button) and the IN-OUT range under the scrub bar
         function updatePointsUi() {
             const clip = currentIndex !== -1 ? playlist[currentIndex] : null;
-            const usable = !!clip && clip.type !== 'image' && !isClock(clip);
+            const usable = !!clip && clip.type !== 'image' && !isClock(clip) && !isWebVideo(clip);
             const inBtn = document.getElementById('btn-in-point');
             const outBtn = document.getElementById('btn-out-point');
             document.querySelectorAll('.frame-row button').forEach(b => { b.disabled = !usable; });
@@ -3288,7 +3439,7 @@
         setInterval(() => {
             if (currentIndex === -1 || isKilling || localEndHandled || programPausedByOperator) return;
             const clip = playlist[currentIndex];
-            if (!clip || clip.type === 'image' || isClock(clip) || !cueUsesPoints(clip)) return;
+            if (!clip || clip.type === 'image' || isClock(clip) || isWebVideo(clip) || !cueUsesPoints(clip)) return;
             const el = liveProgramEl(clip);
             if (!el.getAttribute('src') || (el.paused && !el.ended)) return;
             if (el.ended && clip.endBehavior !== 'loop') return;
@@ -3396,6 +3547,19 @@
             holdProgramSync(500);
             const clip = (currentIndex >= 0) ? playlist[currentIndex] : null;
             if (isClock(clip)) { clockProgramCommand(clip, cmd, val); return; }
+            if (isWebVideo(clip)) {
+                // The output plays it; here only the badges and fades follow
+                if (cmd === 'pause') { programPausedByOperator = true; freezeProgramFades(); return; }
+                const holdBadge = document.getElementById('pgm-hold-badge');
+                if (holdBadge) holdBadge.style.display = 'none';
+                if (cmd === 'play') {
+                    programPausedByOperator = false;
+                    resetProgramFadeOut();
+                } else {
+                    resetProgramFadeOut();
+                }
+                return;
+            }
             const el = (clip?.type === 'audio') ? document.getElementById('program-audio') : document.getElementById('program-video');
             if (!el) return;
 
@@ -3598,6 +3762,12 @@
                 document.getElementById('prog-remaining').innerText = '--:--:--';
                 // With the output closed the PGM monitor is the program: a camera failure turns the cue red
                 startCamView('program', clip, msg => { if (!isOutputWindowOpen) handleProgramMediaError(clip.url, msg); });
+            } else if (isWebVideo(clip)) {
+                // Plays on the output only; the timecode comes from there
+                currentProgramDuration = clip.webvideo.duration || 0;
+                document.getElementById('prog-elapsed').innerText = '--:--:--';
+                document.getElementById('prog-remaining').innerText = '--:--:--';
+                showProgramWebPlaceholder();
             } else if (isWeb(clip)) {
                 // The page plays on the output only; the PGM monitor shows its address
                 currentProgramDuration = 0;

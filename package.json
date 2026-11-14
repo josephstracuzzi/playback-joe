@@ -1,6 +1,6 @@
 {
   "name": "playback-joe",
-  "version": "10.34.0",
+  "version": "10.35.0",
   "description": "Professional cue-based media playback application for Windows, macOS and Linux with dual display support",
   "main": "main.js",
   "scripts": {
@@ -72,6 +72,7 @@
       "grid-logo.png",
       "clock.js",
       "webcam.js",
+      "webvideo.js",
       "vendor/pdfjs/**",
       "logo.ico",
       "icon.png"

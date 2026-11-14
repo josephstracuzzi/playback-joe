@@ -4,6 +4,7 @@
 // ============================================================================
 
 const { app, BrowserWindow, ipcMain, dialog, screen, webContents } = require('electron');
+const PlaybackWebVideo = require('./webvideo.js');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL, fileURLToPath } = require('url');
@@ -284,11 +285,27 @@ app.on('web-contents-created', (event, contents) => {
 
 // The pages the output keeps loaded (one per web cue address), from the operator's cuelist. Sent again to
 // each new output window as it loads.
+// Each is { url, video }: video = a WEB VIDEO cue's player page (parked paused, played on air).
 let webPages = [];
-ipcMain.on('set-web-pages', (event, urls) => {
-    if (!fromOperator(event) || !Array.isArray(urls)) return;
-    webPages = [...new Set(urls.filter(isWebPageUrl))].slice(0, 30);
+ipcMain.on('set-web-pages', (event, pages) => {
+    if (!fromOperator(event) || !Array.isArray(pages)) return;
+    const seen = new Set();
+    webPages = pages
+        .map(p => (p && typeof p === 'object' ? { url: p.url, video: !!p.video } : null))
+        .filter(p => p && isWebPageUrl(p.url) && !seen.has(p.url) && seen.add(p.url))
+        .slice(0, 30);
     if (outputWindow && !outputWindow.isDestroyed()) outputWindow.webContents.send('web-pages', webPages);
+});
+
+// The output read a web video's title and length (or found it can't be played): the console updates its cues
+ipcMain.on('web-video-info', (event, info) => {
+    if (!fromOutput(event) || !info || typeof info.url !== 'string') return;
+    sendToOperator('web-video-info', {
+        url: info.url.slice(0, 4000),
+        title: typeof info.title === 'string' ? info.title.slice(0, 200) : '',
+        duration: numberInRange(info.duration, 0, 360000, 0),
+        error: typeof info.error === 'string' ? info.error.slice(0, 200) : ''
+    });
 });
 
 // A page's sound doesn't pass through the output's Web Audio chain, so its volume (0-1, the cue's volume
@@ -733,7 +750,7 @@ app.on('activate', () => {
 // ============================================================================
 // Cuelists can come from anyone's file, so a cue is rebuilt field by field before it is used or saved:
 // local media files only (no web addresses), known cue types, values inside the ranges the UI allows.
-const CUE_TYPES = ['video', 'audio', 'image', 'clock'];
+const CUE_TYPES = ['video', 'audio', 'image', 'clock', 'webvideo'];
 const END_BEHAVIORS = ['hold', 'advance', 'loop'];
 const ROTATIONS = [0, 90, 180, 270];
 const PROGRAM_COMMANDS = ['play', 'pause', 'seek', 'goto-end', 'set-points'];
@@ -819,6 +836,21 @@ function cleanWeb(w) {
     return w && typeof w === 'object' && isWebPageUrl(w.url) ? { url: w.url } : null;
 }
 
+// A WEB VIDEO cue (webvideo.js): its link is parsed again here, and its url is always the player page built
+// from it, so a cuelist file can't point the output anywhere else. Title and length are what the output
+// last reported, kept so the cue reads right before the page has loaded.
+function cleanWebVideo(w) {
+    if (!w || typeof w !== 'object') return null;
+    const parsed = PlaybackWebVideo.parseLink(w.link);
+    if (!parsed) return null;
+    return {
+        ...parsed,
+        start: w.start === 'restart' ? 'restart' : 'resume',
+        title: typeof w.title === 'string' ? w.title.slice(0, 200) : '',
+        duration: numberInRange(w.duration, 0, 360000, 0)
+    };
+}
+
 // Same as webcamUrl() in webcam.js: never loaded, it names the cue for the media-error checks
 function webcamUrl(w) {
     return 'webcam:' + encodeURIComponent(w.videoId || 'default');
@@ -833,12 +865,15 @@ function cleanCue(c) {
     const webcam = c.type === 'image' && !pattern && !pdf && !web ? cleanWebcam(c.webcam) : null;
     const clock = c.type === 'clock' ? cleanClock(c.clock) : null;
     if (c.type === 'clock' && !clock) return null;
+    const webvideo = c.type === 'webvideo' ? cleanWebVideo(c.webvideo) : null;
+    if (c.type === 'webvideo' && !webvideo) return null;
     const drawn = !!pattern || !!pdf;
     if (typeof originalName !== 'string' || !CUE_TYPES.includes(c.type)) return null;
-    if (!drawn && !clock && !webcam && !web && !isLocalFileUrl(c.url)) return null;
+    if (!drawn && !clock && !webcam && !web && !webvideo && !isLocalFileUrl(c.url)) return null;
     return {
         originalName: originalName.slice(0, 512),
-        url: clock ? '' : web ? web.url : webcam ? webcamUrl(webcam) : drawn ? (isPatternPicture(c.url) ? c.url : '') : c.url,
+        url: clock ? '' : webvideo ? PlaybackWebVideo.playerUrl(webvideo) : web ? web.url : webcam ? webcamUrl(webcam) : drawn ? (isPatternPicture(c.url) ? c.url : '') : c.url,
+        ...(webvideo ? { webvideo } : {}),
         ...(pattern ? { pattern } : {}),
         ...(pdf ? { pdf } : {}),
         ...(clock ? { clock } : {}),
