@@ -815,7 +815,7 @@ function cleanClock(k) {
     if (!k || typeof k !== 'object' || !CLOCK_MODES.includes(k.mode)) return null;
     return {
         mode: k.mode,
-        duration: Math.round(numberInRange(k.duration, 1, 99 * 3600, 300)),
+        duration: Math.round(numberInRange(k.duration, 1, 359999, 300)), // up to 99:59:59, as LENGTH takes it
         target: typeof k.target === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(k.target) ? k.target : '19:30',
         h24: !!k.h24,
         seconds: k.seconds !== false,

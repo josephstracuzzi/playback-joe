@@ -563,8 +563,9 @@
         let wvLastReport = 0;
 
         function stopWebVideoWatch() {
-            clearInterval(wvTimer);
+            clearTimeout(wvTimer);
             wvTimer = null;
+            wvToken++;
         }
 
         function isWebVideoClip(clip) { return clip?.type === 'webvideo'; }
@@ -583,45 +584,65 @@
             rampWebVolume(webGain(clip), 0);
         }
 
+        // Where the cue ends: its OUT point, or half a second before the real end (so the site's own end screen
+        // never shows). `margin` is how early that is.
+        function webVideoEnd(d) {
+            return outPoint !== null ? { at: outPoint, margin: 0 } : { at: d - 0.5, margin: 0.5 };
+        }
+
+        // Polled 10x a second, faster as OUT comes up, so it stops on time
+        let wvToken = 0;
         function watchWebVideo(clip) {
             stopWebVideoWatch();
             const el = webEl;
-            let busy = false;
-            wvTimer = setInterval(async () => {
-                if (busy || currentClip !== clip || webEl !== el) return;
-                busy = true;
+            const token = ++wvToken; // a look still waiting for its answer can't start a second loop
+            const tick = async () => {
+                if (token !== wvToken || currentClip !== clip || webEl !== el) return;
                 const s = await wvRun(el, '__pjv.status()');
-                busy = false;
-                if (!s || currentClip !== clip || webEl !== el) return;
-                if (s.error) { failToBlack(clip.url, `WEB VIDEO CAN'T BE PLAYED: ${s.error.toUpperCase()}`); return; }
-                if (s.d > 0) currentDuration = s.d;
-                if (performance.now() - wvLastReport >= 240) {
-                    wvLastReport = performance.now();
-                    api?.sendTimeUpdate(s.t, s.d);
+                if (token !== wvToken || currentClip !== clip || webEl !== el) return;
+                let next = 100;
+                if (s) next = handleWebVideoStatus(clip, el, s);
+                if (next !== null) wvTimer = setTimeout(tick, next);
+            };
+            wvTimer = setTimeout(tick, 100);
+        }
+
+        // Returns ms until the next look (null = stop)
+        function handleWebVideoStatus(clip, el, s) {
+            if (s.error) { failToBlack(clip.url, `WEB VIDEO CAN'T BE PLAYED: ${s.error.toUpperCase()}`); return null; }
+            if (s.d > 0) currentDuration = s.d;
+            if (performance.now() - wvLastReport >= 240) {
+                wvLastReport = performance.now();
+                api?.sendTimeUpdate(s.t, s.d);
+            }
+            if (operatorPaused || endHandled || !(s.d > 0)) return 100;
+            const end = webVideoEnd(s.d);
+            const timeLeft = end.at - s.t;
+            if (currentFadeOut > 0 && !fadeOutStarted && s.playing && timeLeft <= currentFadeOut && timeLeft > 0.05) webVideoFadeOut(timeLeft);
+            if (s.ended || (s.playing && timeLeft <= 0.02)) {
+                if (currentEndBehavior === 'loop') {
+                    wvRun(el, `(__pjv.seek(${inPoint}), __pjv.play(), true)`);
+                    undoWebVideoFade(clip);
+                } else {
+                    endHandled = true;
+                    // HOLD / ADV at OUT park on the OUT frame, as a file does
+                    wvRun(el, outPoint !== null ? `(__pjv.pause(), __pjv.seek(${outPoint}), true)` : '__pjv.pause()');
+                    api?.sendTimeUpdate(outPoint !== null ? outPoint : s.d, s.d);
+                    if (currentEndBehavior === 'advance') api?.autoAdvance();
                 }
-                if (operatorPaused || endHandled || !(s.d > 0)) return;
-                const timeLeft = s.d - s.t;
-                if (currentFadeOut > 0 && !fadeOutStarted && s.playing && timeLeft <= currentFadeOut + 0.5 && timeLeft > 0.5) webVideoFadeOut(timeLeft - 0.5);
-                // Caught just before the end, so the site's own end screen never shows
-                if (s.ended || (s.playing && timeLeft <= 0.5)) {
-                    if (currentEndBehavior === 'loop') {
-                        wvRun(el, '(__pjv.seek(0), __pjv.play(), true)');
-                        undoWebVideoFade(clip);
-                    } else {
-                        endHandled = true;
-                        wvRun(el, '__pjv.pause()');
-                        api?.sendTimeUpdate(s.d, s.d);
-                        if (currentEndBehavior === 'advance') api?.autoAdvance();
-                    }
-                }
-            }, 100);
+                return 100;
+            }
+            return s.playing ? Math.max(10, Math.min(100, (timeLeft - 0.02) * 1000)) : 100;
         }
 
         // Starts (or picks up) the cue on the page: at `position` (null = where it is), playing or paused.
         // `onShowing` runs once there's a picture to show (playing, or parked on its frame), or after 10 s.
         function playWebVideo(clip, position, paused, onShowing) {
             const el = webEl;
-            wvRun(el, `(__pjv.volume(1), ${position === null ? '' : `__pjv.seek(${Number(position) || 0}),`} ${paused ? '__pjv.pause()' : '__pjv.play()'}, true)`);
+            // position null (RESUME): where it is, unless that's outside IN-OUT (or at the end), then from IN
+            const seek = position !== null ? `__pjv.seek(${Number(position) || 0}),`
+                : `(s => (s.t < ${inPoint} - 0.05 || s.t >= ${outPoint !== null ? outPoint : 'Math.max(0, (s.d || Infinity) - 0.5)'} - 0.1) && __pjv.seek(${inPoint}))(__pjv.status()),`;
+            wvRun(el, `(__pjv.volume(1), ${seek} ${paused ? '__pjv.pause()' : '__pjv.play()'}, true)`);
             const started = performance.now();
             let done = false;
             const check = async () => {
@@ -653,12 +674,14 @@
             if (command === 'play') {
                 const fromTop = endHandled;
                 if (fromTop) {
-                    wvRun(el, '__pjv.seek(0)');
+                    wvRun(el, `__pjv.seek(${inPoint})`);
                     undoWebVideoFade(clip);
                 }
                 endHandled = false;
                 operatorPaused = false;
-                wvRun(el, '__pjv.play()');
+                // PLAY parked at (or past) OUT, e.g. just after setting OUT, starts again from IN, as a file does
+                const end = outPoint !== null ? `${outPoint}` : 'Math.max(0, (s.d || Infinity) - 0.5)';
+                wvRun(el, `(s => { if (s.t >= ${end} - 0.05) __pjv.seek(${inPoint}); __pjv.play(); return true; })(__pjv.status())`);
                 // A fade frozen by PAUSE carries on
                 if (!fromTop && fadeOutStarted) {
                     wvRun(el, '__pjv.status()').then(s => { if (s && currentClip === clip) webVideoFadeOut(s.d - s.t); });
@@ -678,7 +701,8 @@
             } else if (command === 'seek' || command === 'goto-end') {
                 endHandled = false;
                 undoWebVideoFade(clip);
-                const target = command === 'seek' ? value : Math.max(0, currentDuration - value);
+                const end = outPoint !== null ? outPoint : currentDuration;
+                const target = command === 'seek' ? value : Math.max(0, end - value);
                 wvRun(el, `__pjv.seek(${Number(target) || 0})`);
                 api?.sendTimeUpdate(Number(target) || 0, currentDuration);
             }
@@ -762,7 +786,7 @@
                 fadeOverlay.style.opacity = '1';
                 startWeb(clip, () => {
                     if (currentClip !== clip) return;
-                    playWebVideo(clip, clip.webvideo.start === 'restart' ? 0 : null, false, () => {
+                    playWebVideo(clip, clip.webvideo.start === 'restart' ? inPoint : null, false, () => {
                         if (currentClip !== clip) return;
                         fadeOverlay.style.transition = fadeIn > 0 ? `opacity ${fadeIn}s ease` : 'none';
                         fadeOverlay.style.opacity = '0';
@@ -1126,7 +1150,7 @@
                 clockCommand(command, value);
                 return;
             }
-            if (isWebVideoClip(currentClip)) {
+            if (isWebVideoClip(currentClip) && command !== 'set-points') {
                 webVideoCommand(command, value);
                 return;
             }

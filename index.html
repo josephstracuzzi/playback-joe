@@ -107,11 +107,35 @@
         }
 
         /* CLOCK cue settings popup */
-        .clock-modal { border-color: var(--blue); color: #fff; cursor: default; width: 520px; text-align: left; }
-        .clock-modal-title { font-size: 14px; margin-bottom: 16px; color: var(--blue); font-weight: bold; letter-spacing: 1px; text-align: center; }
-        .clock-form { display: flex; flex-direction: column; gap: 10px; margin-bottom: 22px; }
-        .clock-row { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: bold; }
-        .clock-label { width: 120px; color: #aaa; letter-spacing: 0.5px; }
+        /* Settings popups (CLOCK, WEBPAGE / WEB VIDEO): one left edge, like the can't-play popup */
+        .clock-modal { border-color: var(--blue); color: #fff; cursor: default; width: 520px; text-align: left; padding: 28px; }
+        .clock-modal-title { font-size: 14px; margin-bottom: 20px; color: var(--blue); font-weight: bold; letter-spacing: 1px; text-align: left; }
+        .clock-form { display: flex; flex-direction: column; gap: 8px; margin-bottom: 24px; }
+        .clock-row { display: flex; align-items: center; gap: 8px; min-height: 30px; font-size: 11px; font-weight: bold; }
+        .clock-buttons { display: flex; gap: 10px; justify-content: flex-start; }
+        /* CLOCK SETTINGS: wide enough for the four modes on one line, and tall enough for the most rows any
+           mode has (5), so DONE / CANCEL don't move when the mode changes */
+        #clock-modal-overlay .clock-modal { width: 580px; }
+        #clock-modal-overlay .clock-form { min-height: 182px; justify-content: flex-start; }
+        /* Every row on one grid: the label column, then four equal columns. Each button takes one column, so
+           the choices line up under the modes whatever the mode; the label field spans all four. */
+        #clock-modal-overlay .clock-row { display: grid; grid-template-columns: 96px repeat(4, minmax(0, 1fr)); column-gap: 8px; }
+        #clock-modal-overlay .clock-label { width: auto; white-space: nowrap; }
+        /* Every row, field and button exactly 30px tall (the browser's time picker is taller by itself), so
+           nothing moves when the mode changes */
+        #clock-modal-overlay .clock-row { height: 30px; min-height: 30px; }
+        #clock-modal-overlay .clock-choice { width: 100%; min-width: 0; height: 30px; padding: 0 4px; box-sizing: border-box; white-space: nowrap; }
+        #clock-modal-overlay .clock-input { width: 100%; height: 30px; padding-top: 0; padding-bottom: 0; box-sizing: border-box; }
+        #clock-modal-overlay .clock-text { grid-column: 2 / -1; }
+        /* Each clock mode has its own colour (the badge colours used around the app): the chosen mode and every
+           option chosen under it are filled with it */
+        #clock-modal-overlay .clock-modal { --mode-color: var(--blue); }
+        #clock-modal-overlay .clock-modal[data-clock-mode="countdown"] { --mode-color: #d97706; }
+        #clock-modal-overlay .clock-modal[data-clock-mode="until"] { --mode-color: #7c3aed; }
+        #clock-modal-overlay .clock-modal[data-clock-mode="countup"] { --mode-color: #16a34a; }
+        #clock-modal-overlay .clock-choice.is-on { background: var(--mode-color); border-color: var(--mode-color); color: #fff; }
+        #clock-modal-overlay .clock-time { grid-column: 2 / span 2; }
+        .clock-label { width: 96px; flex-shrink: 0; color: #aaa; letter-spacing: 0.5px; }
         .clock-unit { color: #888; }
         .clock-input { background: #111; color: #fff; border: 1px solid #444; border-radius: 3px; padding: 6px 8px; font-family: var(--font-mono); font-size: 13px; width: 70px; outline: none; }
         .clock-input:focus { border-color: var(--blue); }
@@ -123,12 +147,14 @@
         .clock-done { background: rgba(2, 132, 199, 0.2); color: #fff; border: 1px solid var(--blue); }
         .clock-cancel { background: #222; color: #ccc; border: 1px solid #444; }
 
-        .web-url { flex: 1; width: auto; }
+        .web-form { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; margin-bottom: 24px; font-size: 11px; font-weight: bold; }
+        .web-form .clock-label { width: auto; margin-bottom: -4px; }
+        .web-url { width: 100%; box-sizing: border-box; }
         .web-hint { font-size: 10px; color: #888; line-height: 1.5; font-weight: bold; }
         /* Shown while the output window has the keyboard (a WEBPAGE cue can be typed into there) */
         #output-focus-banner { display: none; position: fixed; top: 0; left: 50%; transform: translateX(-50%); z-index: 99999; background: #b45309; color: #fff; font-size: 11px; font-weight: bold; letter-spacing: 0.5px; padding: 6px 16px; border-radius: 0 0 4px 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.6); pointer-events: none; white-space: nowrap; }
 
-        #credits-modal-overlay, #clear-modal-overlay, #delete-modal-overlay, #reset-points-modal-overlay, #clock-modal-overlay, #web-modal-overlay {
+        #credits-modal-overlay, #clear-modal-overlay, #delete-modal-overlay, #reset-points-modal-overlay, #clock-modal-overlay, #web-modal-overlay, #play-error-overlay {
             position: fixed;
             top: 0; left: 0; width: 100vw; height: 100vh;
             background: rgba(0, 0, 0, 0.75);
@@ -505,6 +531,19 @@
         </div>
     </div>
 
+    <!-- A cue that didn't play (or stopped): why. Takes no keys, so Enter / Space / Esc stay TAKE / PAUSE / KILL. -->
+    <div id="play-error-overlay" onclick="hidePlayError()">
+        <!-- Laid out like a log entry: every line on the same left edge -->
+        <div class="focus-modal" style="border-color: #ff4444; color: #fff; cursor: default; width: 460px; text-align: left; padding: 28px;" onclick="event.stopPropagation()">
+            <div id="play-error-title" style="font-size: 14px; margin-bottom: 12px; color: #ff4444; font-weight: bold; letter-spacing: 1px;">CUE CAN'T PLAY</div>
+            <div id="play-error-cue" style="font-size: 12px; font-weight: bold; color: #aaa; margin-bottom: 10px; overflow-wrap: anywhere;"></div>
+            <div id="play-error-text" style="margin-bottom: 24px; font-size: 10px; font-weight: bold; letter-spacing: 0.5px; line-height: 1.6; color: #999; overflow-wrap: anywhere;"></div>
+            <div style="display: flex; gap: 10px; justify-content: flex-start;">
+                <button onclick="hidePlayError(); this.blur();" style="background: #222; color: #ccc; border: 1px solid #444; padding: 8px 28px; font-size: 11px; font-weight: bold; border-radius: 3px; cursor: pointer; outline: none; text-transform: uppercase;">OK</button>
+            </div>
+        </div>
+    </div>
+
     <div id="reset-points-modal-overlay" onclick="hideResetPointsModal()">
         <div class="focus-modal" style="border-color: var(--blue); color: #fff; cursor: default; width: 440px;" onclick="event.stopPropagation()">
             <div style="font-size: 14px; margin-bottom: 12px; color: var(--blue); font-weight: bold; letter-spacing: 1px;">RESET IN/OUT</div>
@@ -522,14 +561,23 @@
     <div id="clock-modal-overlay" onclick="hideClockModal()">
         <div class="focus-modal clock-modal" onclick="event.stopPropagation()">
             <div class="clock-modal-title">CLOCK SETTINGS</div>
+            <!-- Rows keep their places across modes: MODE, LABEL, the mode's own setting, SECONDS, DATE -->
             <div class="clock-form">
+                <div class="clock-row clock-mode-row"><span class="clock-label">MODE</span>
+                    <button class="clock-choice" data-mode="time" onclick="setClockDraft('mode', 'time'); this.blur();">TIME OF DAY</button>
+                    <button class="clock-choice" data-mode="countdown" onclick="setClockDraft('mode', 'countdown'); this.blur();">COUNTDOWN</button>
+                    <button class="clock-choice" data-mode="until" onclick="setClockDraft('mode', 'until'); this.blur();">COUNTDOWN TO</button>
+                    <button class="clock-choice" data-mode="countup" onclick="setClockDraft('mode', 'countup'); this.blur();">COUNT UP</button></div>
+                <div class="clock-row" data-modes="time countdown until countup"><span class="clock-label">LABEL</span>
+                    <input type="text" id="clock-label" class="clock-input clock-text" maxlength="60" placeholder="OPTIONAL TEXT ABOVE THE CLOCK"></div>
+                <!-- COUNT UP has no setting of its own: an empty row keeps SECONDS where it is -->
+                <div class="clock-row" data-modes="countup" aria-hidden="true"></div>
                 <div class="clock-row" data-modes="countdown"><span class="clock-label">LENGTH</span>
-                    <input type="number" id="clock-min" class="clock-input" min="0" max="5999"> <span class="clock-unit">MIN</span>
-                    <input type="number" id="clock-sec" class="clock-input" min="0" max="59"> <span class="clock-unit">SEC</span></div>
-                <div class="clock-row" data-modes="until"><span class="clock-label">COUNT DOWN TO</span>
+                    <input type="text" id="clock-length" class="clock-input clock-time" maxlength="9" spellcheck="false" placeholder="00:05:00" title="HH:MM:SS (5:00 = 5 MINUTES, 90 = 90 SECONDS)" onblur="this.value = formatClockLength(parseClockLength(this.value) ?? clockDraft?.duration ?? 300)"></div>
+                <div class="clock-row" data-modes="until"><span class="clock-label">TARGET</span>
                     <input type="time" id="clock-target" class="clock-input clock-time"></div>
                 <div class="clock-row" data-modes="time"><span class="clock-label">FORMAT</span>
-                    <button class="clock-choice" data-h24="false" onclick="setClockDraft('h24', false); this.blur();">12H AM/PM</button>
+                    <button class="clock-choice" data-h24="false" onclick="setClockDraft('h24', false); this.blur();">12H</button>
                     <button class="clock-choice" data-h24="true" onclick="setClockDraft('h24', true); this.blur();">24H</button></div>
                 <div class="clock-row" data-modes="time countdown until countup"><span class="clock-label">SECONDS</span>
                     <button class="clock-choice" data-seconds="true" onclick="setClockDraft('seconds', true); this.blur();">SHOW</button>
@@ -537,14 +585,8 @@
                 <div class="clock-row" data-modes="time"><span class="clock-label">DATE</span>
                     <button class="clock-choice" data-date="true" onclick="setClockDraft('date', true); this.blur();">SHOW</button>
                     <button class="clock-choice" data-date="false" onclick="setClockDraft('date', false); this.blur();">HIDE</button></div>
-                <div class="clock-row" data-modes="countdown until"><span class="clock-label">AT ZERO</span>
-                    <button class="clock-choice" data-end="hold" onclick="setClockDraft('end', 'hold'); this.blur();">HOLD</button>
-                    <button class="clock-choice" data-end="advance" onclick="setClockDraft('end', 'advance'); this.blur();">ADV</button>
-                    <button class="clock-choice" data-end="loop" data-modes="countdown" onclick="setClockDraft('end', 'loop'); this.blur();">LOOP</button></div>
-                <div class="clock-row" data-modes="time countdown until countup"><span class="clock-label">LABEL</span>
-                    <input type="text" id="clock-label" class="clock-input clock-text" maxlength="60" placeholder="OPTIONAL TEXT ABOVE THE CLOCK"></div>
             </div>
-            <div style="display: flex; gap: 10px; justify-content: center;">
+            <div class="clock-buttons">
                 <button class="clock-done" onclick="confirmClockModal(); this.blur();">DONE</button>
                 <button class="clock-cancel" onclick="hideClockModal(); this.blur();">CANCEL</button>
             </div>
@@ -555,17 +597,15 @@
     <div id="web-modal-overlay" onclick="hideWebModal()">
         <div class="focus-modal clock-modal" onclick="event.stopPropagation()">
             <div class="clock-modal-title" id="web-modal-title">WEBPAGE</div>
-            <div class="clock-form">
-                <div class="clock-row"><span class="clock-label" id="web-modal-label">ADDRESS</span>
-                    <input type="text" id="web-url" class="clock-input web-url" maxlength="4000" spellcheck="false" placeholder="EXAMPLE.COM OR A LOCAL FILE" onkeydown="if (event.key === 'Enter') { event.preventDefault(); confirmWebModal(); }"></div>
-                <div class="clock-row" id="web-modal-file-row"><span class="clock-label"></span>
-                    <button class="clock-choice" onclick="chooseWebFile(); this.blur();">LOCAL FILE...</button></div>
-                <div class="clock-row" id="web-modal-video-hint" style="display: none;"><span class="clock-label"></span>
-                    <span class="web-hint">A YOUTUBE OR VIMEO LINK, OR A LINK TO A VIDEO FILE (MP4, MOV, WEBM). IT LOADS ON THE OUTPUT AS SOON AS IT'S ADDED, PLAYS ON AIR AND PAUSES OFF AIR. THE SITE'S ADS, IF ANY, STILL PLAY.</span></div>
-                <div class="clock-row" id="web-modal-page-hint"><span class="clock-label"></span>
-                    <span class="web-hint">THE PAGE RUNS ON THE OUTPUT FROM THE MOMENT IT'S ADDED (HIDDEN AND MUTED OFF AIR), AND CAN BE CLICKED, SCROLLED AND MADE FULLSCREEN THERE. THE CUE AND PGM MONITORS SHOW ITS ADDRESS ONLY.</span></div>
+            <!-- Stacked: label, field, LOCAL FILE..., hint, all on the same left edge -->
+            <div class="web-form">
+                <span class="clock-label" id="web-modal-label">ADDRESS</span>
+                <input type="text" id="web-url" class="clock-input web-url" maxlength="4000" spellcheck="false" placeholder="EXAMPLE.COM OR A LOCAL FILE" onkeydown="if (event.key === 'Enter') { event.preventDefault(); confirmWebModal(); }">
+                <div id="web-modal-file-row"><button class="clock-choice" onclick="chooseWebFile(); this.blur();">LOCAL FILE...</button></div>
+                <div class="web-hint" id="web-modal-video-hint" style="display: none;">A YOUTUBE OR VIMEO LINK, OR A LINK TO A VIDEO FILE (MP4, MOV, WEBM). IT LOADS ON THE OUTPUT AS SOON AS IT'S ADDED, PLAYS ON AIR AND PAUSES OFF AIR. THE SITE'S ADS, IF ANY, STILL PLAY.</div>
+                <div class="web-hint" id="web-modal-page-hint">THE PAGE RUNS ON THE OUTPUT FROM THE MOMENT IT'S ADDED (HIDDEN AND MUTED OFF AIR), AND CAN BE CLICKED, SCROLLED AND MADE FULLSCREEN THERE. THE CUE AND PGM MONITORS SHOW ITS ADDRESS ONLY.</div>
             </div>
-            <div style="display: flex; gap: 10px; justify-content: center;">
+            <div class="clock-buttons">
                 <button class="clock-done" onclick="confirmWebModal(); this.blur();">DONE</button>
                 <button class="clock-cancel" onclick="hideWebModal(); this.blur();">CANCEL</button>
             </div>
@@ -1478,8 +1518,6 @@
             clip.durationStr = w.duration > 0 ? formatTimecode(w.duration) : 'WEB';
             clip.rotation = 0;
             clip.gain = Math.max(0, Math.min(1, clip.gain ?? 1));
-            delete clip.inPoint;
-            delete clip.outPoint;
         }
 
         function toggleWebVideoStart(idx) {
@@ -1637,6 +1675,8 @@
             if (clip) {
                 if (!playlist.includes(clip) || playlist.indexOf(clip) === currentIndex) return;
                 clip.webvideo = { ...parsed, start: clip.webvideo.start, title: '', duration: 0 };
+                delete clip.inPoint; // points belonged to the old video
+                delete clip.outPoint;
                 applyWebVideoToCue(clip);
                 delete clip.mediaError;
                 renderPlaylist();
@@ -2024,6 +2064,22 @@
             saveStateToLocalStorage();
         }
 
+        // A countdown's LENGTH as HH:MM:SS. Typed as H:M:S, M:S or plain seconds (5:00 = 5 minutes, 90 = 90
+        // seconds); up to 99:59:59. null = not a length.
+        function parseClockLength(text) {
+            const parts = String(text || '').trim().split(':');
+            if (parts.length > 3 || parts.some(p => !/^\d{1,5}$/.test(p))) return null;
+            const [h, m, s] = [0, 0, 0, ...parts.map(Number)].slice(-3);
+            const total = h * 3600 + m * 60 + s;
+            return total > 0 && total <= 359999 ? total : null;
+        }
+
+        function formatClockLength(total) {
+            const t = Math.max(0, Math.min(359999, Math.round(total || 0)));
+            const pad = n => String(n).padStart(2, '0');
+            return `${pad(Math.floor(t / 3600))}:${pad(Math.floor((t % 3600) / 60))}:${pad(t % 60)}`;
+        }
+
         // The settings popup works on a copy, so CANCEL leaves the cue as it was
         let clockModalClip = null;
         let clockDraft = null;
@@ -2032,9 +2088,8 @@
             const clip = playlist[idx];
             if (!isClock(clip) || idx === currentIndex) return;
             clockModalClip = clip;
-            clockDraft = { ...clip.clock, end: clip.endBehavior || 'hold' };
-            document.getElementById('clock-min').value = Math.floor(clockDraft.duration / 60);
-            document.getElementById('clock-sec').value = clockDraft.duration % 60;
+            clockDraft = { ...clip.clock };
+            document.getElementById('clock-length').value = formatClockLength(clockDraft.duration);
             document.getElementById('clock-target').value = clockDraft.target;
             document.getElementById('clock-label').value = clockDraft.label || '';
             renderClockModal();
@@ -2050,14 +2105,14 @@
         // Only the rows for this clock's mode, with the chosen options lit
         function renderClockModal() {
             const mode = clockDraft.mode;
-            document.querySelector('.clock-modal-title').textContent = `CLOCK SETTINGS - ${PlaybackClock.modeLabel(mode)}`;
+            document.querySelector('#clock-modal-overlay .clock-modal').dataset.clockMode = mode; // its colour
             document.querySelectorAll('#clock-modal-overlay [data-modes]').forEach(el => {
                 el.style.display = el.dataset.modes.split(' ').includes(mode) ? '' : 'none';
             });
             document.querySelectorAll('#clock-modal-overlay .clock-choice').forEach(btn => {
-                const key = ['h24', 'seconds', 'date', 'end'].find(k => btn.dataset[k] !== undefined);
+                const key = ['h24', 'seconds', 'date', 'mode'].find(k => btn.dataset[k] !== undefined);
                 const value = btn.dataset[key];
-                const on = key === 'end' ? clockDraft.end === value : String(!!clockDraft[key]) === value;
+                const on = key === 'mode' ? clockDraft.mode === value : String(!!clockDraft[key]) === value;
                 btn.classList.toggle('is-on', on);
             });
         }
@@ -2073,19 +2128,18 @@
             const draft = clockDraft;
             hideClockModal();
             if (!clip || !draft || !playlist.includes(clip) || playlist.indexOf(clip) === currentIndex) return;
-            const min = Math.max(0, Math.min(5999, parseInt(document.getElementById('clock-min').value, 10) || 0));
-            const sec = Math.max(0, Math.min(59, parseInt(document.getElementById('clock-sec').value, 10) || 0));
+            const length = parseClockLength(document.getElementById('clock-length').value);
             const target = document.getElementById('clock-target').value;
             clip.clock = {
                 mode: draft.mode,
-                duration: Math.max(1, min * 60 + sec),
+                duration: Math.max(1, length ?? draft.duration),
                 target: /^\d{2}:\d{2}$/.test(target) ? target : draft.target,
                 h24: !!draft.h24,
                 seconds: draft.seconds !== false,
                 date: !!draft.date,
                 label: document.getElementById('clock-label').value.trim().toUpperCase().slice(0, 60)
             };
-            clip.endBehavior = draft.end;
+            // HOLD / ADV / LOOP stay as set on the row (a mode that can't use one goes back to HOLD)
             updateClockCue(clip);
         }
 
@@ -2601,12 +2655,18 @@
                 let fadeRowHtml = '';
 
                 if (isClock(clip)) {
-                    // A clock: its mode picker and SET (the settings popup, which also holds AT ZERO)
-                    const endLabel = PlaybackClock.hasEnd(clip.clock) ? ({ hold: 'HOLD', advance: 'ADV', loop: 'LOOP' }[clip.endBehavior] || 'HOLD') : 'HOLD';
+                    // A clock: HOLD / ADV / LOOP like any cue (what a countdown does at zero; a mode that can't
+                    // use one has it greyed out), and SET (mode and settings) in the rotation slot
+                    const canAdv = PlaybackClock.hasEnd(clip.clock);
+                    const canLoop = clip.clock.mode === 'countdown';
+                    const end = clip.endBehavior;
+                    const clockBadge = (b, label, allowed) => `<button class="badge ${end === b ? `active-${b}` : ''}" ${isLive || !allowed ? 'disabled' : ''} onclick="setClipBehavior(${idx}, '${b}')"${allowed ? '' : ` title="${PlaybackClock.modeLabel(clip.clock.mode)} HAS NO END"`}>${label}</button>`;
                     badgesHtml = `
                         <div class="clip-badges">
-                            <button class="cue-select pick-anchor" ${isLive ? 'disabled' : ''} onclick="openClockModeMenu(${idx}, this); this.blur();" title="CLOCK MODE">${PlaybackClock.modeLabel(clip.clock.mode)}</button>
-                            <button class="badge active-${endLabel === 'ADV' ? 'advance' : endLabel === 'LOOP' ? 'loop' : 'hold'}" ${isLive ? 'disabled' : ''} onclick="openClockModal(${idx}); this.blur();" title="CLOCK SETTINGS (AT ZERO: ${endLabel})">SET</button>
+                            ${clockBadge('hold', 'HOLD', true)}
+                            ${clockBadge('advance', 'ADV', canAdv)}
+                            ${clockBadge('loop', 'LOOP', canLoop)}
+                            <button class="badge start-toggle" ${isLive ? 'disabled' : ''} onclick="openClockModal(${idx}); this.blur();" title="CLOCK SETTINGS">SET</button>
                         </div>
                     `;
                 } else if (clip.type !== 'image') {
@@ -3287,7 +3347,8 @@
         function stepProgramFrame(dir) {
             if (currentIndex === -1 || isKilling) return;
             const clip = playlist[currentIndex];
-            if (!clip || clip.type === 'image' || isClock(clip) || isWebVideo(clip) || currentProgramDuration <= 0) return;
+            if (!clip || clip.type === 'image' || isClock(clip) || currentProgramDuration <= 0) return;
+            if (isWebVideo(clip) && !isOutputWindowOpen) return; // nothing plays with the output off
             const el = clip.type === 'audio' ? document.getElementById('program-audio') : document.getElementById('program-video');
             // Always PAUSE (harmless if already paused): with the output open the operator's local copy
             // of an audio cue never plays, so its paused flag says nothing about the real program.
@@ -3327,7 +3388,8 @@
         function setCuePoint(which) {
             if (currentIndex === -1 || isKilling) return;
             const clip = playlist[currentIndex];
-            if (!clip || clip.type === 'image' || isClock(clip) || isWebVideo(clip) || currentProgramDuration <= 0) return;
+            if (!clip || clip.type === 'image' || isClock(clip) || currentProgramDuration <= 0) return;
+            if (isWebVideo(clip) && !isOutputWindowOpen) return; // the position comes from the output
             const fd = frameDurByUrl.get(clip.url) || DEFAULT_FRAME_DUR;
             // The middle of the frame on screen, the same spot the frame step buttons land on
             const pos = programPosition(liveProgramEl(clip));
@@ -3394,7 +3456,7 @@
         // IN / OUT buttons (lit when set, time on the button) and the IN-OUT range under the scrub bar
         function updatePointsUi() {
             const clip = currentIndex !== -1 ? playlist[currentIndex] : null;
-            const usable = !!clip && clip.type !== 'image' && !isClock(clip) && !isWebVideo(clip);
+            const usable = !!clip && clip.type !== 'image' && !isClock(clip);
             const inBtn = document.getElementById('btn-in-point');
             const outBtn = document.getElementById('btn-out-point');
             document.querySelectorAll('.frame-row button').forEach(b => { b.disabled = !usable; });
@@ -3681,13 +3743,22 @@
             const takeClip = playlist[takeIdx];
             if (takeClip && takeClip.mediaError) {
                 appendConsoleLog(`TAKE BLOCKED: CUE ${String(takeIdx + 1).padStart(2, '0')} "${takeClip.name}" - ${takeClip.mediaError}. RECHECKING FILE...`);
+                showPlayError("CUE CAN'T PLAY: MEDIA ERROR", takeIdx, `${takeClip.mediaError}.`);
                 loadClipMetadata(takeClip);
+                return;
+            }
+            // Web pages and web videos play on the output only: with it off there's nothing to show them on
+            if (takeClip && (isWeb(takeClip) || isWebVideo(takeClip)) && !isOutputWindowOpen) {
+                appendConsoleLog(`TAKE BLOCKED: CUE ${String(takeIdx + 1).padStart(2, '0')} "${takeClip.name}" - WEB CONTENT ONLY PLAYS ON THE OUTPUT. TURN OUTPUT ON FIRST.`);
+                showPlayError("CUE CAN'T PLAY: OUTPUT IS OFF", takeIdx, `${isWebVideo(takeClip) ? 'WEB VIDEOS' : 'WEBPAGES'} ONLY PLAY ON THE OUTPUT. TURN OUTPUT ON FIRST.`);
                 return;
             }
             if (takeClip && takeClip.pdf && !takeClip.url) {
                 appendConsoleLog(`TAKE BLOCKED: CUE ${String(takeIdx + 1).padStart(2, '0')} "${takeClip.name}" - PDF IS STILL LOADING.`);
+                showPlayError("CUE CAN'T PLAY YET", takeIdx, 'THE PDF IS STILL LOADING. TAKE AGAIN IN A MOMENT.');
                 return;
             }
+            hidePlayError(); // a TAKE that goes ahead clears an old problem (the console keeps the list)
 
             stopPreviewStills(); // no background decoding while a cue is live
 
@@ -3848,6 +3919,20 @@
 
         // A program clip failed (reported by the output window, or by the local program monitor
         // when the output window is closed): mark the cue, log it, and reset PGM to black.
+        // The popup for a cue that didn't play (TAKE refused) or stopped on air (media error). It shows the
+        // latest problem; the console keeps the full list.
+        function showPlayError(title, idx, reason) {
+            const clip = playlist[idx];
+            document.getElementById('play-error-title').textContent = title;
+            document.getElementById('play-error-cue').textContent = clip ? `CUE ${String(idx + 1).padStart(2, '0')}: ${clip.name}` : '';
+            document.getElementById('play-error-text').textContent = String(reason || '').toUpperCase();
+            document.getElementById('play-error-overlay').style.display = 'flex';
+        }
+
+        function hidePlayError() {
+            document.getElementById('play-error-overlay').style.display = 'none';
+        }
+
         function handleProgramMediaError(url, message) {
             let cueLabel = '';
             playlist.forEach((c, i) => {
@@ -3860,6 +3945,7 @@
 
             const live = playlist[currentIndex];
             if (live && live.url === url) {
+                showPlayError('CUE STOPPED: MEDIA ERROR', currentIndex, `${message}. OUTPUT CUT TO BLACK.`);
                 executeKill();
                 const progPlaceholder = document.getElementById('program-placeholder');
                 if (progPlaceholder) {
