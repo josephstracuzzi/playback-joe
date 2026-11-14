@@ -3,7 +3,7 @@
 // Fixed: Context Isolation enabled, Preload Bridge, RFC file URLs, Safe IPC
 // ============================================================================
 
-const { app, BrowserWindow, ipcMain, dialog, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, screen, webContents } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL, fileURLToPath } = require('url');
@@ -223,6 +223,193 @@ function sendOutputStatus(win) {
     mainWindow.webContents.send('output-window-status', { isOpen, isFullScreen: isOpen && isFilling(win) });
 }
 
+function sendToOperator(channel, ...args) {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, ...args);
+}
+
+// ---- WEBPAGE cues ----
+// A web page or local .html file shown on the output in a <webview>, which the operator can click and scroll
+// on the output screen. It runs like a browser tab and nothing more: its own session (no cookies or storage
+// shared with the app), no preload, no Node, sandboxed, http / https / file only, no popups or new windows,
+// and no permissions (camera, microphone, notifications...). Each web cue's page runs, hidden and muted,
+// from the moment the cue is added, so live data keeps updating.
+const WEBPAGE_PARTITION = 'persist:webpage';
+
+function isWebPageUrl(url) {
+    if (typeof url !== 'string' || url.length > 4000) return false;
+    try {
+        const u = new URL(url);
+        if (u.protocol === 'http:' || u.protocol === 'https:') return !!u.hostname;
+        return u.protocol === 'file:' && /\.html?$/i.test(u.pathname);
+    } catch (err) {
+        return false;
+    }
+}
+
+app.on('web-contents-created', (event, contents) => {
+    contents.on('will-attach-webview', (e, webPreferences, params) => {
+        // Only the output window may embed a page, and only a web page address
+        if (!outputWindow || outputWindow.isDestroyed() || contents !== outputWindow.webContents || !isWebPageUrl(params.src)) {
+            e.preventDefault();
+            return;
+        }
+        delete webPreferences.preload;
+        webPreferences.nodeIntegration = false;
+        webPreferences.nodeIntegrationInSubFrames = false;
+        webPreferences.contextIsolation = true;
+        webPreferences.sandbox = true;
+        webPreferences.webviewTag = false;
+        webPreferences.backgroundThrottling = false; // off-air pages run hidden and must keep updating
+        params.partition = WEBPAGE_PARTITION;
+    });
+    if (contents.getType() === 'webview') {
+        // Links that would open a new window open in place instead
+        contents.setWindowOpenHandler(({ url }) => {
+            if (isWebPageUrl(url)) contents.loadURL(url);
+            return { action: 'deny' };
+        });
+        contents.on('will-navigate', (e, url) => { if (!isWebPageUrl(url)) e.preventDefault(); });
+        // Muted until its cue is on air (pages run hidden from the moment their cue is added)
+        const id = contents.id;
+        webVolumes.set(id, 0);
+        contents.setAudioMuted(true);
+        const prepare = () => { applyWebVolume(contents); injectFullscreen(contents); };
+        contents.on('dom-ready', prepare);
+        contents.on('did-frame-finish-load', prepare);
+        contents.on('frame-created', (e, { frame }) => { try { frame?.on('dom-ready', prepare); } catch (err) { /* frame gone */ } });
+        contents.on('media-started-playing', () => applyWebVolume(contents));
+        contents.on('destroyed', () => webVolumes.delete(id));
+    }
+});
+
+// The pages the output keeps loaded (one per web cue address), from the operator's cuelist. Sent again to
+// each new output window as it loads.
+let webPages = [];
+ipcMain.on('set-web-pages', (event, urls) => {
+    if (!fromOperator(event) || !Array.isArray(urls)) return;
+    webPages = [...new Set(urls.filter(isWebPageUrl))].slice(0, 30);
+    if (outputWindow && !outputWindow.isDestroyed()) outputWindow.webContents.send('web-pages', webPages);
+});
+
+// A page's sound doesn't pass through the output's Web Audio chain, so its volume (0-1, the cue's volume
+// capped at 100%) is set on the page's own audio and video elements, in every frame (embedded players
+// too), and again on every play, frame load and new element that loads. Off air the page is muted.
+const webVolumes = new Map();
+
+function outputWebview(id) {
+    const wc = Number.isInteger(id) ? webContents.fromId(id) : null;
+    if (!wc || wc.isDestroyed() || wc.getType() !== 'webview') return null;
+    if (!outputWindow || outputWindow.isDestroyed() || wc.hostWebContents !== outputWindow.webContents) return null;
+    return wc;
+}
+
+// Fullscreen requests from a page (a video player's fullscreen button, say) fill the output screen from inside
+// the page: the element is lifted into the page's top layer and sized to the screen, and the page is told it
+// is fullscreen. The output window itself never changes, so the fade overlay stays on top (fades and KILL
+// cover it). In a frame, the frame's element in the parent page is filled too. Esc on the page leaves it.
+const FULLSCREEN_SCRIPT = `(() => {
+    if (window.__pjFullscreen) return;
+    window.__pjFullscreen = true;
+    const FILL = 'position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;margin:0!important;padding:0!important;border:0!important;transform:none!important;z-index:2147483647!important;background:#000!important;overflow:hidden!important;';
+    let current = null;
+    let savedStyle = null;
+    let hadPopover = false;
+    const fire = el => { for (const name of ['fullscreenchange', 'webkitfullscreenchange']) (el.isConnected ? el : document).dispatchEvent(new Event(name, { bubbles: true })); };
+    const enter = (el, fromChild) => {
+        if (current === el) return;
+        if (current) leave(true);
+        current = el;
+        savedStyle = el.getAttribute('style');
+        hadPopover = el.hasAttribute('popover');
+        el.setAttribute('style', (savedStyle ? savedStyle + ';' : '') + FILL);
+        try { if (!hadPopover) el.setAttribute('popover', 'manual'); el.showPopover(); } catch (e) { /* stays a fixed, top z-index element */ }
+        document.documentElement.classList.add('__pj-fullscreen'); // no scrollbars beside it
+        if (!document.getElementById('__pj-fullscreen-style')) {
+            const s = document.createElement('style');
+            s.id = '__pj-fullscreen-style';
+            s.textContent = 'html.__pj-fullscreen, html.__pj-fullscreen body { overflow: hidden !important; } html.__pj-fullscreen ::-webkit-scrollbar { display: none !important; }';
+            (document.head || document.documentElement).appendChild(s);
+        }
+        if (window.parent !== window) window.parent.postMessage({ __pjFullscreen: true }, '*');
+        fire(el);
+    };
+    const leave = (switching) => {
+        const el = current;
+        if (!el) return;
+        current = null;
+        document.documentElement.classList.remove('__pj-fullscreen');
+        try { el.hidePopover(); } catch (e) {}
+        if (!hadPopover) el.removeAttribute('popover');
+        if (savedStyle === null) el.removeAttribute('style'); else el.setAttribute('style', savedStyle);
+        if (el.tagName === 'IFRAME') { try { el.contentWindow.postMessage({ __pjFullscreen: false }, '*'); } catch (e) {} }
+        if (!switching && window.parent !== window) window.parent.postMessage({ __pjFullscreen: false }, '*');
+        fire(el);
+    };
+    const request = function () { enter(this); return Promise.resolve(); };
+    const exit = () => { leave(false); return Promise.resolve(); };
+    for (const name of ['requestFullscreen', 'webkitRequestFullscreen', 'webkitRequestFullScreen']) Element.prototype[name] = request;
+    for (const name of ['exitFullscreen', 'webkitExitFullscreen', 'webkitCancelFullScreen']) Document.prototype[name] = exit;
+    const getters = { fullscreenElement: () => current, webkitFullscreenElement: () => current, webkitCurrentFullScreenElement: () => current,
+        fullscreen: () => !!current, webkitIsFullScreen: () => !!current, fullscreenEnabled: () => true, webkitFullscreenEnabled: () => true };
+    for (const [name, get] of Object.entries(getters)) Object.defineProperty(Document.prototype, name, { get, configurable: true });
+    window.addEventListener('keydown', e => { if (e.key === 'Escape' && current) { e.preventDefault(); exit(); } }, true);
+    window.addEventListener('message', e => {
+        if (!e.data || typeof e.data.__pjFullscreen !== 'boolean') return;
+        if (e.source === window.parent && e.data.__pjFullscreen === false) { leave(true); return; }
+        const frame = [...document.querySelectorAll('iframe')].find(f => f.contentWindow === e.source);
+        if (!frame) return;
+        if (e.data.__pjFullscreen) enter(frame, true); else if (current === frame) leave(false);
+    });
+})()`;
+
+function injectFullscreen(contents) {
+    if (!contents || contents.isDestroyed()) return;
+    let frames = [];
+    try { frames = contents.mainFrame.framesInSubtree; } catch (err) { /* page going away */ }
+    frames.forEach(f => f.executeJavaScript(FULLSCREEN_SCRIPT).catch(() => {}));
+}
+
+function webVolumeScript(v) {
+    return `(() => {
+        const s = window.__pjVolume || (window.__pjVolume = {});
+        s.v = ${v};
+        const apply = el => { try { el.volume = s.v; } catch (e) {} };
+        if (!s.hooked) {
+            s.hooked = true;
+            const onMedia = e => { if (e.target instanceof HTMLMediaElement) apply(e.target); };
+            document.addEventListener('play', onMedia, true);
+            document.addEventListener('loadedmetadata', onMedia, true);
+        }
+        document.querySelectorAll('audio, video').forEach(apply);
+    })()`;
+}
+
+function applyWebVolume(contents) {
+    if (!contents || contents.isDestroyed()) return Promise.resolve();
+    const script = webVolumeScript(webVolumes.get(contents.id) ?? 0);
+    let frames = [];
+    try { frames = contents.mainFrame.framesInSubtree; } catch (err) { /* page going away */ }
+    return Promise.all(frames.map(f => f.executeJavaScript(script).catch(() => {})));
+}
+
+// { id: the webview's webContents id, v: 0-1, on: on air (heard) or off air (muted) }
+ipcMain.on('web-audio', (event, a) => {
+    if (!fromOutput(event) || !a || !Number.isFinite(a.v)) return;
+    const wc = outputWebview(a.id);
+    if (!wc) return;
+    webVolumes.set(wc.id, Math.round(Math.max(0, Math.min(1, a.v)) * 1000) / 1000);
+    if (!a.on) { wc.setAudioMuted(true); return; }
+    // Unmuted only once the volume is on the page's elements, so it never plays louder than set
+    applyWebVolume(wc).then(() => { if (!wc.isDestroyed()) wc.setAudioMuted(false); });
+});
+
+app.whenReady().then(() => {
+    const { session } = require('electron');
+    const pages = session.fromPartition(WEBPAGE_PARTITION);
+    pages.setPermissionRequestHandler((wc, permission, callback) => callback(false));
+    pages.setPermissionCheckHandler(() => false);
+});
+
 // Messages for the operator's console (shown red, and the CONSOLE button turns red)
 function notifyOperator(message) {
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -372,6 +559,8 @@ function createOutputWindow({ reveal = false, hidden = false } = {}) {
             // Keep timers (heartbeat, fades, time updates) running at full rate even if the output
             // is hidden behind other windows or minimized
             backgroundThrottling: false,
+            // WEBPAGE cues show in a <webview>, locked down by will-attach-webview below
+            webviewTag: true,
             preload: path.join(__dirname, 'preload.js')
         }
     };
@@ -390,6 +579,9 @@ function createOutputWindow({ reveal = false, hidden = false } = {}) {
     // Never maximized (a double-click on the drag area would otherwise do it); FULLSCREEN fills the screen.
     // In case Windows maximizes it anyway, put it straight back.
     win.on('maximize', () => win.unmaximize());
+    // Clicking into a WEBPAGE on the output takes the keyboard there: the console shows a warning meanwhile
+    win.on('focus', () => sendToOperator('output-focus', true));
+    win.on('blur', () => sendToOperator('output-focus', false));
 
     // Crash: the page's process died (anything but a normal shutdown)
     win.webContents.on('render-process-gone', (event, details) => {
@@ -437,6 +629,7 @@ function createOutputWindow({ reveal = false, hidden = false } = {}) {
 
     win.webContents.on('did-finish-load', () => {
         win.webContents.send('output-windowed', !isFilling(win));
+        win.webContents.send('web-pages', webPages); // web cues' pages start loading (hidden) straight away
         sendOutputStatus(win);
         // The page is listening now (the status above can also fire earlier)
         if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('output-ready');
@@ -621,6 +814,11 @@ function cleanWebcam(w) {
     return { videoId: text(w.videoId, 300), videoLabel: text(w.videoLabel, 200), audioId: text(w.audioId, 300), audioLabel: text(w.audioLabel, 200) };
 }
 
+// A WEBPAGE cue is an image cue with `web` = { url }: its url is that page (http, https or a local .html file)
+function cleanWeb(w) {
+    return w && typeof w === 'object' && isWebPageUrl(w.url) ? { url: w.url } : null;
+}
+
 // Same as webcamUrl() in webcam.js: never loaded, it names the cue for the media-error checks
 function webcamUrl(w) {
     return 'webcam:' + encodeURIComponent(w.videoId || 'default');
@@ -631,19 +829,21 @@ function cleanCue(c) {
     const originalName = c.originalName || c.name;
     const pattern = c.type === 'image' ? cleanPattern(c.pattern) : null;
     const pdf = c.type === 'image' ? cleanPdf(c.pdf) : null;
-    const webcam = c.type === 'image' && !pattern && !pdf ? cleanWebcam(c.webcam) : null;
+    const web = c.type === 'image' && !pattern && !pdf ? cleanWeb(c.web) : null;
+    const webcam = c.type === 'image' && !pattern && !pdf && !web ? cleanWebcam(c.webcam) : null;
     const clock = c.type === 'clock' ? cleanClock(c.clock) : null;
     if (c.type === 'clock' && !clock) return null;
     const drawn = !!pattern || !!pdf;
     if (typeof originalName !== 'string' || !CUE_TYPES.includes(c.type)) return null;
-    if (!drawn && !clock && !webcam && !isLocalFileUrl(c.url)) return null;
+    if (!drawn && !clock && !webcam && !web && !isLocalFileUrl(c.url)) return null;
     return {
         originalName: originalName.slice(0, 512),
-        url: clock ? '' : webcam ? webcamUrl(webcam) : drawn ? (isPatternPicture(c.url) ? c.url : '') : c.url,
+        url: clock ? '' : web ? web.url : webcam ? webcamUrl(webcam) : drawn ? (isPatternPicture(c.url) ? c.url : '') : c.url,
         ...(pattern ? { pattern } : {}),
         ...(pdf ? { pdf } : {}),
         ...(clock ? { clock } : {}),
         ...(webcam ? { webcam } : {}),
+        ...(web ? { web } : {}),
         type: c.type,
         gain: numberInRange(c.gain, 0, 3, 1.0),
         fadeIn: numberInRange(c.fadeIn, 0, 5, 0.0),
@@ -927,6 +1127,17 @@ ipcMain.on('log-error', (event, message) => {
 });
 
 // File Dialogs with standard RFC URL formatting
+// WEBPAGE: pick a local .html file
+ipcMain.handle('dialog:openHtml', async (event) => {
+    if (!fromOperator(event)) return null;
+    const result = await dialog.showOpenDialog(mainWindow, {
+        title: 'Choose a web page',
+        properties: ['openFile'],
+        filters: [{ name: 'Web pages', extensions: ['html', 'htm'] }]
+    });
+    return result.canceled || !result.filePaths[0] ? null : pathToFileURL(result.filePaths[0]).href;
+});
+
 ipcMain.handle('dialog:openFile', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
         properties: ['openFile', 'multiSelections'],

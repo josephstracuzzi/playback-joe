@@ -35,6 +35,13 @@ contextBridge.exposeInMainWorld('playbackAPI', {
     logError: (message) => ipcRenderer.send('log-error', message),
     reportMediaError: (info) => ipcRenderer.send('output-media-error', info),
     heartbeat: () => ipcRenderer.send('output-heartbeat'),
+    setWebAudio: (audio) => ipcRenderer.send('web-audio', audio),
+    setWebPages: (urls) => ipcRenderer.send('set-web-pages', urls),
+    onWebPages: (callback) => {
+        const handler = (event, urls) => callback(urls);
+        ipcRenderer.on('web-pages', handler);
+        return () => ipcRenderer.removeListener('web-pages', handler);
+    },
 
     // File & Cuelist Dialogs
     openFileDialog: () => ipcRenderer.invoke('dialog:openFile'),
@@ -48,6 +55,12 @@ contextBridge.exposeInMainWorld('playbackAPI', {
     probeVideoTrack: (url) => ipcRenderer.invoke('probe-video-track', url),
     showPage: (url) => ipcRenderer.send('show-page', url),
     prepareWebcam: (webcam) => ipcRenderer.send('prepare-webcam', webcam),
+    openHtmlDialog: () => ipcRenderer.invoke('dialog:openHtml'),
+    onOutputFocus: (callback) => {
+        const handler = (event, focused) => callback(focused);
+        ipcRenderer.on('output-focus', handler);
+        return () => ipcRenderer.removeListener('output-focus', handler);
+    },
     onPrepareWebcam: (callback) => {
         const handler = (event, webcam) => callback(webcam);
         ipcRenderer.on('prepare-webcam', handler);

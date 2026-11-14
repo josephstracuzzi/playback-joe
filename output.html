@@ -29,6 +29,10 @@
         /* Windowed: drag anywhere to move the borderless window. Only then, so the output filling a screen shows
            the normal cursor (Windows draws its own over a drag area). main.js sends output-windowed. */
         body.is-windowed, body.is-windowed video, body.is-windowed img, body.is-windowed canvas { -webkit-app-region: drag; }
+        /* A WEBPAGE cue: the page fills the output and takes clicks and scrolling (never a drag area) */
+        /* Off-air pages keep running underneath, hidden (they keep their full size so they lay out as on air) */
+        .web-page { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; -webkit-app-region: no-drag; visibility: hidden; pointer-events: none; }
+        .web-page.on-air { visibility: visible; pointer-events: auto; }
         #output-fade-overlay { 
             position: absolute; 
             top: 0; 
@@ -444,11 +448,120 @@
             if (webcamEl.readyState >= 2) shown(); else webcamEl.addEventListener('loadeddata', shown, { once: true });
         }
 
+        // ---- WEBPAGE cues ----
+        // An image cue with `web` settings: the page in a <webview> (locked down by main.js). Every web cue's page
+        // runs from the moment the cue is added (the console sends the list: `web-pages`), hidden and muted while
+        // off air, so live data keeps updating. TAKE shows it (black until it has loaded the first time) with
+        // its fade and volume; KILL or the next TAKE hides and mutes it again. A page that can't load turns
+        // the cue red when taken (and is tried again on the next TAKE).
+        const webPages = new Map(); // url -> { el, ready, failed, waiters }
+        let wantedWebPages = new Set();
+        let webEl = null; // the page on air
+        // The page's volume is set by main.js on its own media elements (it can't pass through Web Audio), so it
+        // stops at 100%. Fades step it 20 times a second.
+        let webVol = 0;
+        let webRampTimer = null;
+
+        function webGain(clip) { return Math.max(0, Math.min(1, clip.gain ?? 1)); }
+
+        function webContentsId(el) {
+            try { return el.getWebContentsId(); } catch (err) { return null; }
+        }
+
+        function setWebVolume(v) {
+            webVol = v;
+            const id = webEl && webContentsId(webEl);
+            if (id) api?.setWebAudio?.({ id, v, on: true });
+        }
+
+        function rampWebVolume(target, seconds) {
+            clearInterval(webRampTimer);
+            webRampTimer = null;
+            if (!(seconds > 0)) { setWebVolume(target); return; }
+            const from = webVol;
+            const start = performance.now();
+            webRampTimer = setInterval(() => {
+                const k = Math.min(1, (performance.now() - start) / (seconds * 1000));
+                setWebVolume(from + (target - from) * k);
+                if (k >= 1) { clearInterval(webRampTimer); webRampTimer = null; }
+            }, 50);
+        }
+
+        function createWebPage(url) {
+            const el = document.createElement('webview');
+            el.className = 'web-page';
+            el.setAttribute('partition', 'persist:webpage');
+            // Lets main.js see "open in a new window" links, which it opens in place instead (never a window)
+            el.setAttribute('allowpopups', '');
+            const page = { url, el, ready: false, failed: null, waiters: [] };
+            el.addEventListener('dom-ready', () => {
+                page.failed = null;
+                if (page.ready) return;
+                page.ready = true;
+                page.waiters.splice(0).forEach(f => f());
+            });
+            el.addEventListener('did-fail-load', (e) => {
+                // -3 = a navigation replaced by another one, not a failure
+                if (!e.isMainFrame || e.errorCode === -3) return;
+                page.failed = `PAGE FAILED TO LOAD: ${String(e.errorDescription || e.errorCode).toUpperCase()}`;
+                page.ready = false;
+                page.waiters.length = 0;
+                if (webEl === el && currentClip) failToBlack(currentClip.url, page.failed);
+            });
+            el.src = url;
+            document.body.insertBefore(el, fadeOverlay);
+            webPages.set(url, page);
+            return page;
+        }
+
+        function removeWebPage(page) {
+            page.el.remove();
+            webPages.delete(page.url);
+        }
+
+        // The console's list of web cue addresses: new ones start loading, unused ones close (not the one on air)
+        api?.onWebPages?.((urls) => {
+            wantedWebPages = new Set(Array.isArray(urls) ? urls : []);
+            wantedWebPages.forEach(url => { if (!webPages.has(url)) createWebPage(url); });
+            webPages.forEach(page => { if (!wantedWebPages.has(page.url) && page.el !== webEl) removeWebPage(page); });
+        });
+
+        // Off air: hidden and muted, still running
+        function stopWeb() {
+            clearInterval(webRampTimer);
+            webRampTimer = null;
+            webVol = 0;
+            if (!webEl) return;
+            const el = webEl;
+            webEl = null;
+            el.classList.remove('on-air');
+            const id = webContentsId(el);
+            if (id) api?.setWebAudio?.({ id, v: 0, on: false });
+            const page = [...webPages.values()].find(p => p.el === el);
+            if (page && !wantedWebPages.has(page.url)) removeWebPage(page);
+        }
+
+        function startWeb(clip, onShowing) {
+            stopWeb();
+            let page = webPages.get(clip.web.url) || createWebPage(clip.web.url);
+            if (page.failed) {
+                // Try a page that failed again (a network that's back, say)
+                page.failed = null;
+                page.ready = false;
+                page.el.reload();
+            }
+            webEl = page.el;
+            webEl.classList.add('on-air');
+            if (page.ready) onShowing?.();
+            else if (onShowing) page.waiters.push(() => { if (webEl === page.el) onShowing(); });
+        }
+
         api?.onPlayVideo((clip) => {
             // A TAKE during a KILL fade cancels the pending KILL cleanup, so it can't blank the new clip
             if (killCleanupTimer) { clearTimeout(killCleanupTimer); killCleanupTimer = null; }
             stopClock();
             stopWebcam();
+            stopWeb();
             currentClip = clip;
             operatorPaused = false;
             fadeOutStarted = false;
@@ -481,6 +594,16 @@
                         fadeOverlay.style.opacity = '0';
                     }, 50);
                 }
+            } else if (clip.web) {
+                currentDuration = 0;
+                api.sendTimeUpdate(0, 0);
+                fadeOverlay.style.opacity = '1';
+                startWeb(clip, () => {
+                    if (currentClip !== clip) return;
+                    fadeOverlay.style.transition = fadeIn > 0 ? `opacity ${fadeIn}s ease` : 'none';
+                    fadeOverlay.style.opacity = '0';
+                    rampWebVolume(webGain(clip), fadeIn); // sound rises with the picture
+                });
             } else if (clip.webcam) {
                 currentDuration = 0;
                 api.sendTimeUpdate(0, 0);
@@ -586,6 +709,15 @@
             };
             stopClock();
             stopWebcam();
+            stopWeb();
+            if (clip.web) {
+                // The page loads afresh (anything scrolled or clicked on it before starts over)
+                startWeb(clip, () => {
+                    if (currentClip === clip) setWebVolume(webGain(clip) * (Number.isFinite(level) ? level : 1));
+                    confirm();
+                });
+                return;
+            }
             if (clip.webcam) {
                 // The camera opens silent; once its picture is up the sound rises over the 40 ms crossfade
                 initAudio();
@@ -685,6 +817,7 @@
             currentClip = null;
             fadeOutStarted = false;
             stopWebcam();
+            stopWeb();
             vid.pause();
             vid.style.display = 'none';
             aud.pause();
@@ -885,11 +1018,13 @@
             rampGainToSilence(vidGainNode, 1);
             rampGainToSilence(audGainNode, 1);
             rampGainToSilence(camGainNode, 1);
+            if (webEl) rampWebVolume(0, 1);
             if (killCleanupTimer) clearTimeout(killCleanupTimer);
             killCleanupTimer = setTimeout(() => {
                 killCleanupTimer = null;
                 stopClock();
                 stopWebcam();
+                stopWeb();
                 vid.pause();
                 vid.src = '';
                 vid.style.display = 'none';

@@ -123,7 +123,12 @@
         .clock-done { background: rgba(2, 132, 199, 0.2); color: #fff; border: 1px solid var(--blue); }
         .clock-cancel { background: #222; color: #ccc; border: 1px solid #444; }
 
-        #credits-modal-overlay, #clear-modal-overlay, #delete-modal-overlay, #reset-points-modal-overlay, #clock-modal-overlay {
+        .web-url { flex: 1; width: auto; }
+        .web-hint { font-size: 10px; color: #888; line-height: 1.5; font-weight: bold; }
+        /* Shown while the output window has the keyboard (a WEBPAGE cue can be typed into there) */
+        #output-focus-banner { display: none; position: fixed; top: 0; left: 50%; transform: translateX(-50%); z-index: 99999; background: #b45309; color: #fff; font-size: 11px; font-weight: bold; letter-spacing: 0.5px; padding: 6px 16px; border-radius: 0 0 4px 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.6); pointer-events: none; white-space: nowrap; }
+
+        #credits-modal-overlay, #clear-modal-overlay, #delete-modal-overlay, #reset-points-modal-overlay, #clock-modal-overlay, #web-modal-overlay {
             position: fixed;
             top: 0; left: 0; width: 100vw; height: 100vh;
             background: rgba(0, 0, 0, 0.75);
@@ -543,6 +548,27 @@
         </div>
     </div>
 
+    <!-- WEBPAGE cue address. Enter in the field is DONE; the buttons blur, so Enter / Esc stay TAKE / KILL. -->
+    <div id="web-modal-overlay" onclick="hideWebModal()">
+        <div class="focus-modal clock-modal" onclick="event.stopPropagation()">
+            <div class="clock-modal-title">WEBPAGE</div>
+            <div class="clock-form">
+                <div class="clock-row"><span class="clock-label">ADDRESS</span>
+                    <input type="text" id="web-url" class="clock-input web-url" maxlength="4000" spellcheck="false" placeholder="EXAMPLE.COM OR A LOCAL FILE" onkeydown="if (event.key === 'Enter') { event.preventDefault(); confirmWebModal(); }"></div>
+                <div class="clock-row"><span class="clock-label"></span>
+                    <button class="clock-choice" onclick="chooseWebFile(); this.blur();">LOCAL FILE...</button></div>
+                <div class="clock-row"><span class="clock-label"></span>
+                    <span class="web-hint">THE PAGE RUNS ON THE OUTPUT FROM THE MOMENT IT'S ADDED (HIDDEN AND MUTED OFF AIR), AND CAN BE CLICKED, SCROLLED AND MADE FULLSCREEN THERE. THE CUE AND PGM MONITORS SHOW ITS ADDRESS ONLY.</span></div>
+            </div>
+            <div style="display: flex; gap: 10px; justify-content: center;">
+                <button class="clock-done" onclick="confirmWebModal(); this.blur();">DONE</button>
+                <button class="clock-cancel" onclick="hideWebModal(); this.blur();">CANCEL</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="output-focus-banner">THE OUTPUT HAS THE KEYBOARD: ENTER, SPACE AND ESC GO TO THE WEB PAGE. CLICK THIS WINDOW TO TAKE THEM BACK.</div>
+
     <!-- Error Console Modal Pop-up -->
     <div id="error-console-modal" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.8); display: none; align-items: center; justify-content: center; z-index: 999999;">
         <div style="width: 720px; height: 460px; background: #1a1a1a; border: 1px solid #444; border-radius: 6px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 15px 35px rgba(0,0,0,0.9);">
@@ -796,6 +822,8 @@
             // During a hand-back this window stays the program until the output confirms it has the cue
             isOutputWindowOpen = isOpen && !handBackTimer;
             isOutputFullscreen = isFullScreen;
+            showProgramWebPlaceholder();
+            if (!isOpen) document.getElementById('output-focus-banner').style.display = 'none';
 
             const progVid = document.getElementById('program-video');
             if (progVid) progVid.muted = isOutputWindowOpen;
@@ -994,6 +1022,7 @@
             const clip = playlist[currentIndex];
             isOutputWindowOpen = false; // this window is the program from now on (main confirms shortly)
             resetProgramMonitorSpeed(); // it may have been trimming; the real program plays at normal speed
+            showProgramWebPlaceholder(); // a page isn't shown here: it waits for OUTPUT on, and reloads then
             clearTimeout(handBackMuteTimer);
             if (isClock(clip)) {
                 // The PGM clock is already running in step: line it up with the output's last report
@@ -1153,6 +1182,7 @@
         function finishHandBack(crossfade) {
             clearHandBack();
             isOutputWindowOpen = true;
+            showProgramWebPlaceholder();
             const mute = () => {
                 document.getElementById('program-video').muted = true;
                 document.getElementById('program-audio').volume = 0;
@@ -1278,6 +1308,7 @@
         const audioSvg = `<svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>`;
         const clockSvg = `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><polyline points="12 7 12 12 15.5 14"></polyline></svg>`;
         const webcamSvg = `<svg viewBox="0 0 24 24"><circle cx="12" cy="10" r="7"></circle><circle cx="12" cy="10" r="2.5"></circle><path d="M8 20h8M12 17v3"></path></svg>`;
+        const webSvg = `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9s1.3-6.4 3.8-9z"></path></svg>`;
 
         // CLOCK cues on the CUE and PGM monitors. The PGM copy keeps the same time as the output's (same
         // settings, same transport commands); with the output closed it's the program: it drives the timecode
@@ -1410,6 +1441,123 @@
             if (playlist[stagedIndex] === clip) selectClip(stagedIndex);
             saveStateToLocalStorage();
         }
+
+        // WEBPAGE cues: an image cue with `web` = { url }. The page runs on the output only (main.js locks it
+        // down); the CUE and PGM monitors show its address, so nothing heavy runs twice.
+        function isWeb(clip) { return !!clip?.web; }
+
+        function webAddress(url) {
+            try {
+                const u = new URL(url);
+                if (u.protocol === 'file:') return decodeURIComponent(u.pathname.split('/').pop() || url);
+                return (u.host + (u.pathname === '/' ? '' : u.pathname)).slice(0, 120);
+            } catch (err) {
+                return url;
+            }
+        }
+
+        function applyWebToCue(clip) {
+            clip.url = clip.web.url;
+            const local = clip.web.url.startsWith('file:');
+            clip.name = `WEBPAGE - ${webAddress(clip.web.url)}`;
+            clip.originalName = clip.name;
+            clip.format = local ? 'HTML' : 'WEB';
+            clip.codec = local ? 'LOCAL FILE' : new URL(clip.web.url).protocol === 'https:' ? 'HTTPS' : 'HTTP';
+            clip.resolution = 'LIVE';
+            clip.durationStr = 'LIVE';
+            clip.endBehavior = 'hold';
+            clip.fadeOut = 0;
+            clip.gain = Math.max(0, Math.min(1, clip.gain ?? 1)); // the page's own volume: up to 100%
+            clip.rotation = 0;
+        }
+
+        // What the console's monitors show for a page (it plays on the output only)
+        function webMonitorText(clip, onProgram) {
+            if (onProgram && !isOutputWindowOpen) return `WEBPAGE: ${webAddress(clip.url)}\nTURN OUTPUT ON TO SHOW IT`;
+            return `WEBPAGE${onProgram ? ' ON THE OUTPUT' : ''}: ${webAddress(clip.url)}`;
+        }
+
+        function showProgramWebPlaceholder() {
+            const clip = playlist[currentIndex];
+            const placeholder = document.getElementById('program-placeholder');
+            if (!isWeb(clip) || !placeholder || isKilling) return;
+            placeholder.innerText = webMonitorText(clip, true);
+            placeholder.classList.remove('is-error');
+            placeholder.style.display = 'block';
+        }
+
+        // http and https pages, or a local .html file. An address typed without a scheme gets https://
+        function normaliseWebUrl(text) {
+            let t = String(text || '').trim();
+            if (!t) return null;
+            if (!/^[a-z][a-z0-9+.-]*:/i.test(t)) t = `https://${t}`;
+            try {
+                const u = new URL(t);
+                if ((u.protocol === 'http:' || u.protocol === 'https:') && u.hostname) return u.href;
+                if (u.protocol === 'file:' && /\.html?$/i.test(u.pathname)) return u.href;
+            } catch (err) { /* not an address */ }
+            return null;
+        }
+
+        // The address popup: for a new WEBPAGE cue (webModalClip null) or an existing one
+        let webModalClip = null;
+        let webModalOpen = false;
+
+        function openWebModal(idx) {
+            const clip = idx === undefined ? null : playlist[idx];
+            if (clip && (!isWeb(clip) || idx === currentIndex)) return;
+            if (!clip && isCuelistLocked()) return;
+            webModalClip = clip;
+            webModalOpen = true;
+            const input = document.getElementById('web-url');
+            input.value = clip ? clip.web.url : '';
+            document.getElementById('web-modal-overlay').style.display = 'flex';
+            input.focus();
+            input.select();
+        }
+
+        function hideWebModal() {
+            webModalClip = null;
+            webModalOpen = false;
+            const input = document.getElementById('web-url');
+            input.blur();
+            document.getElementById('web-modal-overlay').style.display = 'none';
+        }
+
+        async function chooseWebFile() {
+            const url = await api.openHtmlDialog?.();
+            if (url && webModalOpen) document.getElementById('web-url').value = url;
+        }
+
+        function confirmWebModal() {
+            const url = normaliseWebUrl(document.getElementById('web-url').value);
+            if (!url) {
+                appendConsoleLog('WEBPAGE: ENTER A WEB ADDRESS (HTTP OR HTTPS) OR CHOOSE A LOCAL .HTML FILE.');
+                document.getElementById('web-url').focus();
+                return;
+            }
+            const clip = webModalClip;
+            hideWebModal();
+            if (clip) {
+                if (!playlist.includes(clip) || playlist.indexOf(clip) === currentIndex) return;
+                clip.web = { url };
+                applyWebToCue(clip);
+                delete clip.mediaError;
+                renderPlaylist();
+                if (playlist[stagedIndex] === clip) selectClip(stagedIndex);
+                saveStateToLocalStorage();
+                return;
+            }
+            if (isCuelistLocked()) return;
+            const cue = { type: 'image', gain: 1.0, fadeIn: 0.0, fadeOut: 0.0, rotation: 0, endBehavior: 'hold', web: { url } };
+            applyWebToCue(cue);
+            finishAddingCue(cue);
+        }
+
+        // Keys typed on the output (a page there can take them) never reach this window: say so
+        api.onOutputFocus?.(focused => {
+            document.getElementById('output-focus-banner').style.display = focused ? 'block' : 'none';
+        });
         // Rotation badge at 0°: a small rotate icon instead of "0°" (the angle shows once it is turned)
         const rotateSvg = `<svg class="badge-icon" viewBox="0 0 24 24" aria-label="ROTATE"><path d="M20 12a8 8 0 1 1-2.34-5.66"></path><polyline points="20 4 20 9 15 9"></polyline></svg>`;
         const volumeSvg =`<svg viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>`;
@@ -1663,6 +1811,10 @@
                 finishAddingCue(clip);
                 return;
             }
+            if (choice === 'webpage') {
+                openWebModal();
+                return;
+            }
             if (choice === 'webcam') {
                 const clip = { ...base, webcam: { videoId: '', videoLabel: '', audioId: '', audioLabel: '' } };
                 applyWebcamToCue(clip);
@@ -1729,7 +1881,7 @@
 
         function openPatternMenu(anchor) {
             if (isCuelistLocked()) return;
-            openPickMenu(anchor, [['grid', 'GRID'], ['sync', 'SYNC TEST'], ['generator', 'GENERATOR'], ['clock', 'CLOCK'], ['webcam', 'WEBCAM']], null, addTestPattern);
+            openPickMenu(anchor, [['grid', 'GRID'], ['sync', 'SYNC TEST'], ['generator', 'GENERATOR'], ['clock', 'CLOCK'], ['webcam', 'WEBCAM'], ['webpage', 'WEBPAGE']], null, addTestPattern);
         }
 
         function openClockModeMenu(idx, anchor) {
@@ -2005,6 +2157,14 @@
                 preparePdfCue(clip, callback);
                 return;
             }
+            if (isWeb(clip)) {
+                // Nothing to check ahead: a page that won't load turns the cue red when it's taken
+                applyWebToCue(clip);
+                delete clip.mediaError;
+                if (callback) callback();
+                renderPlaylist();
+                return;
+            }
             if (clip.type === 'image') {
                 const img = new Image();
                 img.src = clip.url;
@@ -2086,7 +2246,18 @@
             };
         }
 
+        // The output keeps each web cue's page running (hidden off air): tell it whenever the list changes
+        let lastWebPages = null;
+        function syncWebPages() {
+            const urls = [...new Set(playlist.filter(isWeb).map(c => c.web.url))];
+            const key = JSON.stringify(urls);
+            if (key === lastWebPages) return;
+            lastWebPages = key;
+            api.setWebPages?.(urls);
+        }
+
         function saveStateToLocalStorage() {
+            syncWebPages();
             try {
                 const cleanData = playlist.map(c => ({
                     originalName: c.originalName || c.name,
@@ -2096,6 +2267,7 @@
                     pdf: c.pdf,
                     clock: c.clock,
                     webcam: c.webcam,
+                    web: c.web,
                     type: c.type,
                     gain: c.gain !== undefined ? c.gain : 1.0,
                     fadeIn: c.fadeIn !== undefined ? c.fadeIn : 0.0,
@@ -2276,6 +2448,7 @@
                 if (clip.type === 'audio') iconHtml = audioSvg;
                 if (isClock(clip)) iconHtml = clockSvg;
                 if (isWebcam(clip)) iconHtml = webcamSvg;
+                if (isWeb(clip)) iconHtml = webSvg;
 
                 const isBoosted = clip.gain > 1.0;
                 const cueNumStr = (idx + 1).toString().padStart(2, '0');
@@ -2307,6 +2480,15 @@
                             <button class="badge ${clip.endBehavior === 'advance' ? 'active-advance' : ''}" ${isLive ? 'disabled' : ''} onclick="setClipBehavior(${idx}, 'advance')">ADV</button>
                             <button class="badge ${clip.endBehavior === 'loop' ? 'active-loop' : ''}" ${isLive ? 'disabled' : ''} onclick="setClipBehavior(${idx}, 'loop')">LOOP</button>
                             <button class="badge ${rotVal > 0 ? 'active-rot' : ''}" ${isLive ? 'disabled' : ''} onclick="cycleClipRotation(${idx})" title="ROTATION: ${rotVal}° (CLICK TO TURN 90°)">${rotVal > 0 ? `${rotVal}°` : rotateSvg}</button>
+                        </div>
+                    `;
+                } else if (isWeb(clip)) {
+                    // A page: its address (opens the address popup); no rotation, the page fills the screen
+                    badgesHtml = `
+                        <div class="clip-badges">
+                            <button class="badge active-hold badge-fixed" title="A WEBPAGE HOLDS UNTIL THE NEXT TAKE OR KILL">HOLD</button>
+                            <button class="cue-select" ${isLive ? 'disabled' : ''} onclick="openWebModal(${idx}); this.blur();" title="ADDRESS: ${escapeHtml(clip.web.url)}">${escapeHtml(webAddress(clip.web.url))}</button>
+                            <span class="badge slot-spacer" aria-hidden="true"></span>
                         </div>
                     `;
                 } else {
@@ -2403,7 +2585,7 @@
                                 <span class="clip-name" title="${escapeHtml(clip.name)}">${escapeHtml(clip.name)}</span>
                             </div>
                             <div class="clip-right-group" onclick="event.stopPropagation()">
-                                ${(clip.type === 'image' && !(isWebcam(clip) && clip.webcam.audioId)) || isClock(clip) ? '' : `<div class="clip-controls">
+                                ${(clip.type === 'image' && !(isWebcam(clip) && clip.webcam.audioId) && !isWeb(clip)) || isClock(clip) ? '' : `<div class="clip-controls">
                                     <div class="control-group">
                                         ${volumeSvg}
                                         <input type="range" id="vol-input-${idx}" class="inline-volume ${volumeStateClass(clip.gain)}" min="0" max="200" step="1" value="${gainToFaderPos(clip.gain)}" style="--vol-pct: ${gainToFaderPos(clip.gain) / 2}%" ${isLive ? 'disabled' : ''} oninput="setClipGain(${idx}, this.value)" onchange="this.blur()" onmouseup="this.blur()" ondblclick="resetClipGain(${idx})" title="VOLUME: ${Math.round(clip.gain * 100)}% (DOUBLE-CLICK: 100%)">
@@ -2480,7 +2662,8 @@
             if (idx === currentIndex) return;
             let pos = parseInt(faderPos, 10);
             const inputEl = document.getElementById(`vol-input-${idx}`);
-            if (Math.abs(pos - 100) <= VOL_DETENT) {
+            // A web page's volume is set on the page itself, which stops at 100%: its fader can't pass the centre
+            if (Math.abs(pos - 100) <= VOL_DETENT || (isWeb(playlist[idx]) && pos > 100)) {
                 pos = 100;
                 if (inputEl) inputEl.value = 100;
             }
@@ -2745,6 +2928,8 @@
                     if (placeholder) { placeholder.innerText = msg; placeholder.style.display = 'block'; }
                 });
                 else if (placeholder) { placeholder.innerText = clip.mediaError; placeholder.style.display = 'block'; }
+            } else if (isWeb(clip)) {
+                if (placeholder) { placeholder.innerText = webMonitorText(clip, false); placeholder.style.display = 'block'; }
             } else if (clip.type === 'image') {
                 prevImg.style.display = 'block';
                 prevImg.style.opacity = '1';
@@ -3413,6 +3598,12 @@
                 document.getElementById('prog-remaining').innerText = '--:--:--';
                 // With the output closed the PGM monitor is the program: a camera failure turns the cue red
                 startCamView('program', clip, msg => { if (!isOutputWindowOpen) handleProgramMediaError(clip.url, msg); });
+            } else if (isWeb(clip)) {
+                // The page plays on the output only; the PGM monitor shows its address
+                currentProgramDuration = 0;
+                document.getElementById('prog-elapsed').innerText = '--:--:--';
+                document.getElementById('prog-remaining').innerText = '--:--:--';
+                showProgramWebPlaceholder();
             } else if (clip.type === 'image') {
                 progImg.style.display = 'block';
                 progImg.style.opacity = '1';

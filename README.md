@@ -87,6 +87,9 @@ The **PATTERN** list next to CLEAR adds a test cue to the cuelist: the bundled *
 ### Webcam
 **PATTERN → WEBCAM** adds a live camera cue. Pick the camera on the cue, and a separate **SOUND** input if you want sound (NONE by default), for example a mixer feed instead of the camera's own microphone. Sound goes through the cue's volume fader and the meter. If the camera or sound input isn't connected, the cue turns red and won't TAKE. On a Mac, allow the camera and microphone the first time macOS asks.
 
+### Webpage
+**PATTERN → WEBPAGE** adds a web page cue, for example Slido, Canva or Google Slides, or a live data page: type an address (http or https) or pick a local **.html** file. The page starts running on the output as soon as the cue is added, hidden and muted while it's off air, so live data keeps updating. On TAKE it appears with the cue's fade in and volume (up to 100%); KILL or the next TAKE hides and mutes it again, without closing it. It can be clicked, scrolled and typed into **on the output screen only**; the CUE and PGM monitors show its address. A page's own fullscreen or Present button fills the output screen, and it stays fullscreen while off air (Esc on the page leaves it). Links that would open a new window open in place. A page that can't load turns the cue red when taken, and is tried again on the next TAKE. OUTPUT off and on reloads the pages. While the output window has the keyboard, a banner on the console warns that Enter, Space and Esc go to the page until you click back on the console. Pages can't use the camera, microphone or other permissions, and can't reach the app.
+
 <img src="docs/feature-test-patterns.png" width="738" alt="A generator cue with its pattern list open, showing grid, colour bars, greyscale, checkerboard and solid colours">
 
 ### Starter cues
