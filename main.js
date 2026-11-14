@@ -540,7 +540,7 @@ app.on('activate', () => {
 // ============================================================================
 // Cuelists can come from anyone's file, so a cue is rebuilt field by field before it is used or saved:
 // local media files only (no web addresses), known cue types, values inside the ranges the UI allows.
-const CUE_TYPES = ['video', 'audio', 'image'];
+const CUE_TYPES = ['video', 'audio', 'image', 'clock'];
 const END_BEHAVIORS = ['hold', 'advance', 'loop'];
 const ROTATIONS = [0, 90, 180, 270];
 const PROGRAM_COMMANDS = ['play', 'pause', 'seek', 'goto-end', 'set-points'];
@@ -598,19 +598,38 @@ function cleanPdf(p) {
     return { file: p.file, page, pages };
 }
 
+// A CLOCK cue has no file: it's drawn live from these settings (clock.js)
+const CLOCK_MODES = ['time', 'countdown', 'until', 'countup'];
+
+function cleanClock(k) {
+    if (!k || typeof k !== 'object' || !CLOCK_MODES.includes(k.mode)) return null;
+    return {
+        mode: k.mode,
+        duration: Math.round(numberInRange(k.duration, 1, 99 * 3600, 300)),
+        target: typeof k.target === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(k.target) ? k.target : '19:30',
+        h24: !!k.h24,
+        seconds: k.seconds !== false,
+        date: !!k.date,
+        label: typeof k.label === 'string' ? k.label.slice(0, 60) : ''
+    };
+}
+
 function cleanCue(c) {
     if (!c || typeof c !== 'object') return null;
     const originalName = c.originalName || c.name;
     const pattern = c.type === 'image' ? cleanPattern(c.pattern) : null;
     const pdf = c.type === 'image' ? cleanPdf(c.pdf) : null;
+    const clock = c.type === 'clock' ? cleanClock(c.clock) : null;
+    if (c.type === 'clock' && !clock) return null;
     const drawn = !!pattern || !!pdf;
     if (typeof originalName !== 'string' || !CUE_TYPES.includes(c.type)) return null;
-    if (!drawn && !isLocalFileUrl(c.url)) return null;
+    if (!drawn && !clock && !isLocalFileUrl(c.url)) return null;
     return {
         originalName: originalName.slice(0, 512),
-        url: drawn ? (isPatternPicture(c.url) ? c.url : '') : c.url,
+        url: clock ? '' : drawn ? (isPatternPicture(c.url) ? c.url : '') : c.url,
         ...(pattern ? { pattern } : {}),
         ...(pdf ? { pdf } : {}),
+        ...(clock ? { clock } : {}),
         type: c.type,
         gain: numberInRange(c.gain, 0, 3, 1.0),
         fadeIn: numberInRange(c.fadeIn, 0, 5, 0.0),
@@ -759,7 +778,7 @@ ipcMain.on('set-output-display', (event, id) => {
 ipcMain.on('cue-video', (event, clip) => {
     if (!fromOperator(event)) return;
     const cue = cleanCue(clip);
-    if (!cue || !cue.url) {
+    if (!cue || (!cue.url && cue.type !== 'clock')) {
         notifyOperator('TAKE REFUSED BY THE OUTPUT: NOT A VALID CUE OR NOT A LOCAL MEDIA FILE.');
         return;
     }
@@ -776,7 +795,7 @@ ipcMain.on('cue-video', (event, clip) => {
 ipcMain.on('resume-output', (event, state) => {
     if (!fromOperator(event) || !state) return;
     const cue = cleanCue(state.clip);
-    if (!cue || !cue.url || !(Number.isFinite(state.position) && state.position >= 0)) return;
+    if (!cue || (!cue.url && cue.type !== 'clock') || !(Number.isFinite(state.position) && state.position >= 0)) return;
     if (outputWindow && !outputWindow.isDestroyed()) {
         // A playing cue appears when it starts (start-output); a paused one once it shows its frame (output-resumed)
         outputWindow.pjAppearOn = state.preroll ? 'start' : 'resumed';
@@ -787,6 +806,8 @@ ipcMain.on('resume-output', (event, state) => {
             preroll: !!state.preroll,
             operatorPaused: !!state.operatorPaused,
             atEnd: !!state.atEnd,
+            // A clock keeps the PGM copy's length (a COUNTDOWN TO was measured when it was taken)
+            ...(Number.isFinite(state.duration) ? { duration: numberInRange(state.duration, 0, 99 * 3600, 0) } : {}),
             level: numberInRange(state.level, 0, 1, 1),
             token: numberInRange(state.token, 0, Number.MAX_SAFE_INTEGER, 0)
         });

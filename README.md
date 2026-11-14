@@ -81,6 +81,9 @@ Add a **PDF** with ADD MEDIA and it becomes one cue. Pick a page from its dropdo
 ### Test patterns
 The **PATTERN** list next to CLEAR adds a test cue to the cuelist: the bundled **Grid** or **Sync Test**, or a **Generator** cue. A generator cue is a normal cue with its own pattern and size pickers: grid, colour bars, greyscale, checkerboard or a solid colour, from 720p to 4K.
 
+### Clock
+**PATTERN → CLOCK** adds a live clock cue. Pick its mode on the cue: **TIME OF DAY** (12H AM/PM or 24H, with or without seconds and the date), **COUNTDOWN** (a set length from TAKE), **COUNTDOWN TO** (a time of day, such as doors at 19:30) or **COUNT UP**. **SET** opens its settings, including an optional label above the clock and what a countdown does at zero: HOLD, ADV to the next cue, or LOOP. Countdowns turn amber in the last minute and red in the last 10 seconds, and PLAY, PAUSE, GO TO 20 / 10, fades and OUTPUT on / off all work with them.
+
 <img src="docs/feature-test-patterns.png" width="738" alt="A generator cue with its pattern list open, showing grid, colour bars, greyscale, checkerboard and solid colours">
 
 ### Starter cues

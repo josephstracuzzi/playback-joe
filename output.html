@@ -19,7 +19,7 @@
             position: relative; 
             user-select: none;
         }
-        video, img {
+        video, img, canvas {
             width: 100%;
             height: 100%;
             object-fit: contain;
@@ -28,7 +28,7 @@
         }
         /* Windowed: drag anywhere to move the borderless window. Only then, so the output filling a screen shows
            the normal cursor (Windows draws its own over a drag area). main.js sends output-windowed. */
-        body.is-windowed, body.is-windowed video, body.is-windowed img { -webkit-app-region: drag; }
+        body.is-windowed, body.is-windowed video, body.is-windowed img, body.is-windowed canvas { -webkit-app-region: drag; }
         #output-fade-overlay { 
             position: absolute; 
             top: 0; 
@@ -49,8 +49,10 @@
     <div id="output-fade-overlay"></div>
     <video id="output-video"></video>
     <img id="output-image" />
+    <canvas id="output-clock" width="1920" height="1080"></canvas>
     <audio id="output-audio"></audio>
 
+    <script src="clock.js"></script>
     <script>
         // Supports both contextBridge (window.playbackAPI) and legacy fallback
         const api = window.playbackAPI || (typeof require !== 'undefined' ? {
@@ -71,6 +73,7 @@
         const img = document.getElementById('output-image');
         const aud = document.getElementById('output-audio');
         const fadeOverlay = document.getElementById('output-fade-overlay');
+        const clockCanvas = document.getElementById('output-clock');
 
         let currentClip = null;
         let currentFadeOut = 0;
@@ -238,9 +241,94 @@
             }
         }
 
+        // ---- CLOCK cues (clock.js) ----
+        // Drawn live on their own canvas, with no media element: the runner keeps the time, reports it to the
+        // console like a clip's position, and handles the countdown's fade-out and end (HOLD / ADV / LOOP).
+        const clockRunner = new PlaybackClock.ClockRunner(clockCanvas);
+        let lastClockReport = 0;
+
+        function stopClock() {
+            clockRunner.stop();
+            clockCanvas.style.display = 'none';
+        }
+
+        function startClock(clip, opts) {
+            clockCanvas.style.display = 'block';
+            clockRunner.start(clip.clock, opts);
+            currentDuration = clockRunner.duration;
+        }
+
+        function clockFadeOut(timeLeft) {
+            fadeOutStarted = true;
+            fadeOverlay.style.transition = `opacity ${Math.max(0.05, timeLeft)}s linear`;
+            fadeOverlay.style.opacity = '1';
+        }
+
+        clockRunner.ontick = (cur, dur) => {
+            if (currentClip?.type !== 'clock') return;
+            if (performance.now() - lastClockReport >= 240) {
+                lastClockReport = performance.now();
+                api?.sendTimeUpdate(cur, dur);
+            }
+            // Countdown fade-out (picture only: a clock has no sound), ending at zero
+            if (currentFadeOut > 0 && dur > 0 && !clockRunner.paused && !fadeOutStarted) {
+                const timeLeft = dur - cur;
+                if (timeLeft <= currentFadeOut && timeLeft > -0.1) clockFadeOut(timeLeft);
+            }
+        };
+
+        clockRunner.onend = () => {
+            if (currentClip?.type !== 'clock' || operatorPaused) return;
+            api?.sendTimeUpdate(clockRunner.duration, clockRunner.duration);
+            if (currentEndBehavior === 'loop') {
+                fadeOutStarted = false;
+                fadeOverlay.style.transition = 'none';
+                fadeOverlay.style.opacity = '0';
+                clockRunner.play(); // from the top
+            } else if (currentEndBehavior === 'advance') {
+                endHandled = true;
+                api?.autoAdvance();
+            }
+            // HOLD: stays on 0:00
+        };
+
+        function clockCommand(command, value) {
+            if (command === 'play') {
+                const fromTop = clockRunner.ended || (clockRunner.duration > 0 && clockRunner.elapsed >= clockRunner.duration);
+                if (fromTop) {
+                    fadeOutStarted = false;
+                    fadeOverlay.style.transition = 'none';
+                    fadeOverlay.style.opacity = '0';
+                }
+                operatorPaused = false;
+                endHandled = false;
+                clockRunner.play();
+                if (fadeOutStarted) clockFadeOut(clockRunner.duration - clockRunner.elapsed);
+                else if (currentFadeIn > 0 && clockRunner.elapsed < currentFadeIn) {
+                    fadeOverlay.style.transition = `opacity ${currentFadeIn - clockRunner.elapsed}s ease`;
+                    fadeOverlay.style.opacity = '0';
+                }
+            } else if (command === 'pause') {
+                operatorPaused = true;
+                clockRunner.pause();
+                const frozenOpacity = getComputedStyle(fadeOverlay).opacity;
+                fadeOverlay.style.transition = 'none';
+                fadeOverlay.style.opacity = frozenOpacity;
+            } else if (command === 'seek' || command === 'goto-end') {
+                fadeOutStarted = false;
+                endHandled = false;
+                fadeOverlay.style.transition = 'none';
+                fadeOverlay.style.opacity = '0';
+                const dur = clockRunner.duration;
+                clockRunner.seek(command === 'seek' ? value : Math.max(0, dur - value));
+            }
+            api?.sendTimeUpdate(clockRunner.elapsed, clockRunner.duration);
+        }
+
         api?.onPlayVideo((clip) => {
             // A TAKE during a KILL fade cancels the pending KILL cleanup, so it can't blank the new clip
             if (killCleanupTimer) { clearTimeout(killCleanupTimer); killCleanupTimer = null; }
+            stopClock();
             currentClip = clip;
             operatorPaused = false;
             fadeOutStarted = false;
@@ -262,7 +350,18 @@
             fadeOverlay.style.transition = 'none';
             fadeOverlay.style.opacity = '0';
 
-            if (clip.type === 'image') {
+            if (clip.type === 'clock') {
+                startClock(clip, {});
+                api.sendTimeUpdate(0, clockRunner.duration);
+                if (fadeIn > 0) {
+                    fadeOverlay.style.opacity = '1';
+                    setTimeout(() => {
+                        if (currentClip !== clip) return;
+                        fadeOverlay.style.transition = `opacity ${fadeIn}s ease`;
+                        fadeOverlay.style.opacity = '0';
+                    }, 50);
+                }
+            } else if (clip.type === 'image') {
                 img.style.display = 'block';
                 img.style.transform = `rotate(${rot}deg)`;
                 img.src = clip.url;
@@ -351,6 +450,14 @@
                 confirmed = true;
                 api.outputResumed(token);
             };
+            stopClock();
+            if (clip.type === 'clock') {
+                // Picks the clock up where the PGM monitor's copy is (no preroll: nothing to load)
+                startClock(clip, { elapsed: position, paused: !!paused, duration: Number.isFinite(state.duration) ? state.duration : null });
+                if (state.atEnd) clockRunner.ended = true;
+                confirm();
+                return;
+            }
             if (clip.type === 'image') {
                 img.style.display = 'block';
                 img.style.transform = `rotate(${clip.rotation || 0}deg)`;
@@ -377,7 +484,7 @@
         // The PGM copy has reached the prerolled point: start, and let the operator know
         api?.onStartOutput?.(({ level, fadeInLeft, fadingOut, token }) => {
             const clip = currentClip;
-            if (!clip || clip.type === 'image') return;
+            if (!clip || clip.type === 'image' || clip.type === 'clock') return;
             const el = activeEl();
             el.play().then(() => {
                 if (currentClip !== clip) return;
@@ -427,7 +534,7 @@
         const MEDIA_ERROR_TEXT = { 1: 'LOAD ABORTED', 2: 'NETWORK/DISK READ ERROR', 3: 'DECODE ERROR (CORRUPT OR UNSUPPORTED CODEC)', 4: 'FILE MISSING OR FORMAT NOT SUPPORTED' };
 
         function failToBlack(failedUrl, message) {
-            if (!currentClip || currentClip.url !== failedUrl) return;
+            if (!failedUrl || !currentClip || currentClip.url !== failedUrl) return;
             const clipName = currentClip.originalName || currentClip.name || failedUrl;
             currentClip = null;
             fadeOutStarted = false;
@@ -443,7 +550,8 @@
         }
 
         function onMediaElementError(el) {
-            if (!el.error || !currentClip) return;
+            // A clock has no file (url ''), and clearing an element (src '') would otherwise match it
+            if (!el.error || !currentClip || !currentClip.url) return;
             if (el.getAttribute('src') !== currentClip.url) return;
             failToBlack(currentClip.url, MEDIA_ERROR_TEXT[el.error.code] || 'UNKNOWN MEDIA ERROR');
         }
@@ -524,7 +632,7 @@
         // the OUT frame, ADV pauses there and asks for the next cue. A LOOP cue with only an IN point
         // also lands here at the end of the file, since the native loop would restart at 0.
         setInterval(() => {
-            if (!currentClip || currentClip.type === 'image' || !usesPoints() || endHandled || operatorPaused) return;
+            if (!currentClip || currentClip.type === 'image' || currentClip.type === 'clock' || !usesPoints() || endHandled || operatorPaused) return;
             const el = activeEl();
             if (!el.getAttribute('src') || (el.paused && !el.ended)) return;
             // Reached the real file end: HOLD / ADV are handled by 'ended' above, only LOOP needs us
@@ -547,6 +655,10 @@
         }, 10);
 
         api?.onProgramCommand((command, value) => {
+            if (currentClip?.type === 'clock') {
+                clockCommand(command, value);
+                return;
+            }
             if (command === 'play') {
                 const el = (currentClip?.type === 'audio') ? aud : vid;
                 // PLAY from (or past) OUT, or parked at the end of the file, starts the cue again from IN
@@ -628,6 +740,7 @@
             if (killCleanupTimer) clearTimeout(killCleanupTimer);
             killCleanupTimer = setTimeout(() => {
                 killCleanupTimer = null;
+                stopClock();
                 vid.pause();
                 vid.src = '';
                 vid.style.display = 'none';

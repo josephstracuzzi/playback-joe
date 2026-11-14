@@ -106,7 +106,24 @@
             cursor: default;
         }
 
-        #credits-modal-overlay, #clear-modal-overlay, #delete-modal-overlay, #reset-points-modal-overlay {
+        /* CLOCK cue settings popup */
+        .clock-modal { border-color: var(--blue); color: #fff; cursor: default; width: 520px; text-align: left; }
+        .clock-modal-title { font-size: 14px; margin-bottom: 16px; color: var(--blue); font-weight: bold; letter-spacing: 1px; text-align: center; }
+        .clock-form { display: flex; flex-direction: column; gap: 10px; margin-bottom: 22px; }
+        .clock-row { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: bold; }
+        .clock-label { width: 120px; color: #aaa; letter-spacing: 0.5px; }
+        .clock-unit { color: #888; }
+        .clock-input { background: #111; color: #fff; border: 1px solid #444; border-radius: 3px; padding: 6px 8px; font-family: var(--font-mono); font-size: 13px; width: 70px; outline: none; }
+        .clock-input:focus { border-color: var(--blue); }
+        .clock-time { width: 110px; color-scheme: dark; }
+        .clock-text { flex: 1; width: auto; text-transform: uppercase; }
+        .clock-choice { background: #1a1a1a; color: #888; border: 1px solid #333; padding: 6px 12px; font-size: 10px; font-weight: bold; border-radius: 3px; cursor: pointer; outline: none; }
+        .clock-choice.is-on { background: rgba(2, 132, 199, 0.25); color: #fff; border-color: var(--blue); }
+        .clock-done, .clock-cancel { padding: 8px 20px; font-size: 11px; font-weight: bold; border-radius: 3px; cursor: pointer; outline: none; text-transform: uppercase; }
+        .clock-done { background: rgba(2, 132, 199, 0.2); color: #fff; border: 1px solid var(--blue); }
+        .clock-cancel { background: #222; color: #ccc; border: 1px solid #444; }
+
+        #credits-modal-overlay, #clear-modal-overlay, #delete-modal-overlay, #reset-points-modal-overlay, #clock-modal-overlay {
             position: fixed;
             top: 0; left: 0; width: 100vw; height: 100vh;
             background: rgba(0, 0, 0, 0.75);
@@ -493,6 +510,39 @@
         </div>
     </div>
 
+    <!-- CLOCK cue settings. Typing in its fields keeps its keys; its buttons blur, so Enter / Esc stay TAKE / KILL. -->
+    <div id="clock-modal-overlay" onclick="hideClockModal()">
+        <div class="focus-modal clock-modal" onclick="event.stopPropagation()">
+            <div class="clock-modal-title">CLOCK SETTINGS</div>
+            <div class="clock-form">
+                <div class="clock-row" data-modes="countdown"><span class="clock-label">LENGTH</span>
+                    <input type="number" id="clock-min" class="clock-input" min="0" max="5999"> <span class="clock-unit">MIN</span>
+                    <input type="number" id="clock-sec" class="clock-input" min="0" max="59"> <span class="clock-unit">SEC</span></div>
+                <div class="clock-row" data-modes="until"><span class="clock-label">COUNT DOWN TO</span>
+                    <input type="time" id="clock-target" class="clock-input clock-time"></div>
+                <div class="clock-row" data-modes="time"><span class="clock-label">FORMAT</span>
+                    <button class="clock-choice" data-h24="false" onclick="setClockDraft('h24', false); this.blur();">12H AM/PM</button>
+                    <button class="clock-choice" data-h24="true" onclick="setClockDraft('h24', true); this.blur();">24H</button></div>
+                <div class="clock-row" data-modes="time countdown until countup"><span class="clock-label">SECONDS</span>
+                    <button class="clock-choice" data-seconds="true" onclick="setClockDraft('seconds', true); this.blur();">SHOW</button>
+                    <button class="clock-choice" data-seconds="false" onclick="setClockDraft('seconds', false); this.blur();">HIDE</button></div>
+                <div class="clock-row" data-modes="time"><span class="clock-label">DATE</span>
+                    <button class="clock-choice" data-date="true" onclick="setClockDraft('date', true); this.blur();">SHOW</button>
+                    <button class="clock-choice" data-date="false" onclick="setClockDraft('date', false); this.blur();">HIDE</button></div>
+                <div class="clock-row" data-modes="countdown until"><span class="clock-label">AT ZERO</span>
+                    <button class="clock-choice" data-end="hold" onclick="setClockDraft('end', 'hold'); this.blur();">HOLD</button>
+                    <button class="clock-choice" data-end="advance" onclick="setClockDraft('end', 'advance'); this.blur();">ADV</button>
+                    <button class="clock-choice" data-end="loop" data-modes="countdown" onclick="setClockDraft('end', 'loop'); this.blur();">LOOP</button></div>
+                <div class="clock-row" data-modes="time countdown until countup"><span class="clock-label">LABEL</span>
+                    <input type="text" id="clock-label" class="clock-input clock-text" maxlength="60" placeholder="OPTIONAL TEXT ABOVE THE CLOCK"></div>
+            </div>
+            <div style="display: flex; gap: 10px; justify-content: center;">
+                <button class="clock-done" onclick="confirmClockModal(); this.blur();">DONE</button>
+                <button class="clock-cancel" onclick="hideClockModal(); this.blur();">CANCEL</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Error Console Modal Pop-up -->
     <div id="error-console-modal" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.8); display: none; align-items: center; justify-content: center; z-index: 999999;">
         <div style="width: 720px; height: 460px; background: #1a1a1a; border: 1px solid #444; border-radius: 6px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 15px 35px rgba(0,0,0,0.9);">
@@ -579,6 +629,7 @@
                 <div class="monitor-box">
                     <video id="preview-video" muted playsinline></video>
                     <canvas id="preview-still"></canvas>
+                    <canvas id="preview-clock" width="1920" height="1080"></canvas>
                     <img id="preview-image" />
                     <audio id="preview-audio"></audio>
                     <span id="preview-placeholder" class="monitor-placeholder">NO CLIP</span>
@@ -599,6 +650,7 @@
                 <div class="monitor-box">
                     <video id="program-video" muted playsinline></video>
                     <img id="program-image" />
+                    <canvas id="program-clock" width="1920" height="1080"></canvas>
                     <audio id="program-audio"></audio>
                     <div id="program-fade-overlay" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #000; opacity: 0; pointer-events: none; transition: none; z-index: 20;"></div>
                     <span id="program-placeholder" class="monitor-placeholder">NO OUTPUT</span>
@@ -661,6 +713,7 @@
         </div>
     </div>
 
+    <script src="clock.js"></script>
     <script>
         const rawIpc = (typeof require !== 'undefined') ? require('electron').ipcRenderer : null;
         const api = window.playbackAPI || {
@@ -937,7 +990,10 @@
             isOutputWindowOpen = false; // this window is the program from now on (main confirms shortly)
             resetProgramMonitorSpeed(); // it may have been trimming; the real program plays at normal speed
             clearTimeout(handBackMuteTimer);
-            if (clip.type !== 'image') {
+            if (isClock(clip)) {
+                // The PGM clock is already running in step: line it up with the output's last report
+                if (!programPausedByOperator && !programClock.ended && Math.abs(programClock.elapsed - programReportedTime) > 0.3) programClock.seek(programReportedTime);
+            } else if (clip.type !== 'image') {
                 const el = liveProgramEl(clip);
                 const pos = programReportedTime;  // the output's own position
                 const holdBadge = document.getElementById('pgm-hold-badge');
@@ -1027,7 +1083,13 @@
             handBackWatch = null;
             const state = { clip, level: programFadeState(clip).level, position: 0, paused: true, operatorPaused: programPausedByOperator, token: ++handBackToken };
             handBackPhase = 'final';
-            if (clip.type !== 'image') {
+            if (isClock(clip)) {
+                // A clock has nothing to load: the output picks it up straight away where the PGM copy is
+                state.position = programClock.elapsed;
+                state.duration = programClock.duration;
+                state.atEnd = programClock.ended;
+                state.paused = programPausedByOperator || programClock.ended;
+            } else if (clip.type !== 'image') {
                 const el = liveProgramEl(clip);
                 const holdBadge = document.getElementById('pgm-hold-badge');
                 const atEnd = localEndHandled || el.ended || (!!holdBadge && holdBadge.style.display === 'inline-block');
@@ -1129,6 +1191,7 @@
             const progFade = document.getElementById('program-fade-overlay');
             if (progVid) { progVid.pause(); progVid.src = ''; progVid.style.display = 'none'; }
             if (progImg) { progImg.src = ''; progImg.style.display = 'none'; }
+            stopProgramClock();
             if (progAud) { progAud.pause(); progAud.src = ''; }
             if (progFade) { progFade.style.transition = 'none'; progFade.style.opacity = '0'; }
             
@@ -1201,6 +1264,39 @@
         const videoSvg = `<svg viewBox="0 0 24 24"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>`;
         const imageSvg = `<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>`;
         const audioSvg = `<svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>`;
+        const clockSvg = `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><polyline points="12 7 12 12 15.5 14"></polyline></svg>`;
+
+        // CLOCK cues on the CUE and PGM monitors. The PGM copy keeps the same time as the output's (same
+        // settings, same transport commands); with the output closed it's the program: it drives the timecode
+        // and does ADV at zero itself.
+        const previewClock = new PlaybackClock.ClockRunner(document.getElementById('preview-clock'));
+        const programClock = new PlaybackClock.ClockRunner(document.getElementById('program-clock'));
+        let lastProgramClockReport = 0;
+
+        programClock.ontick = (cur, dur) => {
+            if (!isClock(playlist[currentIndex]) || isOutputWindowOpen || isKilling) return;
+            if (performance.now() - lastProgramClockReport < 240) return;
+            lastProgramClockReport = performance.now();
+            handleTimeUpdate(cur, dur);
+        };
+
+        programClock.onend = () => {
+            const clip = playlist[currentIndex];
+            if (!isClock(clip) || programPausedByOperator || isKilling) return;
+            if (clip.endBehavior === 'loop') {
+                resetProgramFadeOut();
+                programClock.play(); // from the top, like the output
+                return;
+            }
+            if (isOutputWindowOpen) return; // the output does HOLD / ADV
+            handleTimeUpdate(programClock.duration, programClock.duration);
+            if (clip.endBehavior === 'advance') localAdvance();
+        };
+
+        function stopProgramClock() {
+            programClock.stop();
+            document.getElementById('program-clock').style.display = 'none';
+        }
         // Rotation badge at 0°: a small rotate icon instead of "0°" (the angle shows once it is turned)
         const rotateSvg = `<svg class="badge-icon" viewBox="0 0 24 24" aria-label="ROTATE"><path d="M20 12a8 8 0 1 1-2.34-5.66"></path><polyline points="20 4 20 9 15 9"></polyline></svg>`;
         const volumeSvg =`<svg viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>`;
@@ -1422,9 +1518,36 @@
             saveStateToLocalStorage();
         }
 
+        // ---- CLOCK cues (clock.js) ----
+        // A clock is a live picture with no file: time of day, a countdown, a countdown to a time, or a count-up.
+        // It's drawn here on the CUE and PGM monitors and on the output, each from the same settings.
+        function isClock(clip) { return clip?.type === 'clock'; }
+
+        // Fills in everything about a clock cue that follows from its settings
+        function applyClockToCue(clip) {
+            clip.name = PlaybackClock.clockName(clip.clock);
+            clip.originalName = clip.name;
+            clip.format = 'CLOCK';
+            clip.codec = PlaybackClock.modeLabel(clip.clock.mode);
+            clip.resolution = '1920X1080';
+            clip.gain = 1.0;
+            clip.rotation = 0;
+            if (!PlaybackClock.hasEnd(clip.clock)) clip.endBehavior = 'hold';
+            if (clip.clock.mode === 'until' && clip.endBehavior === 'loop') clip.endBehavior = 'hold';
+            clip.duration = PlaybackClock.clockDuration(clip.clock);
+            clip.durationStr = clip.duration > 0 ? formatTimecode(clip.duration) : 'LIVE';
+            delete clip.mediaError;
+        }
+
         async function addTestPattern(choice) {
             if (isCuelistLocked() || !choice) return;
             const base = { type: 'image', gain: 1.0, fadeIn: 0.0, fadeOut: 0.0, rotation: 0, endBehavior: 'hold' };
+            if (choice === 'clock') {
+                const clip = { ...base, type: 'clock', url: '', clock: PlaybackClock.defaultClock() };
+                applyClockToCue(clip);
+                finishAddingCue(clip);
+                return;
+            }
             if (choice === 'generator') {
                 const clip = { ...base, pattern: { kind: 'bars', width: 1920, height: 1080 } };
                 applyPatternToCue(clip);
@@ -1485,7 +1608,89 @@
 
         function openPatternMenu(anchor) {
             if (isCuelistLocked()) return;
-            openPickMenu(anchor, [['grid', 'GRID'], ['sync', 'SYNC TEST'], ['generator', 'GENERATOR']], null, addTestPattern);
+            openPickMenu(anchor, [['grid', 'GRID'], ['sync', 'SYNC TEST'], ['generator', 'GENERATOR'], ['clock', 'CLOCK']], null, addTestPattern);
+        }
+
+        function openClockModeMenu(idx, anchor) {
+            const clip = playlist[idx];
+            if (!isClock(clip) || idx === currentIndex) return;
+            openPickMenu(anchor, PlaybackClock.CLOCK_MODES, clip.clock.mode, mode => {
+                clip.clock = { ...clip.clock, mode };
+                updateClockCue(clip);
+            });
+        }
+
+        // Settings changed (mode picker or the popup): name, length and the CUE monitor follow
+        function updateClockCue(clip) {
+            applyClockToCue(clip);
+            renderPlaylist();
+            if (playlist[stagedIndex] === clip) selectClip(stagedIndex);
+            saveStateToLocalStorage();
+        }
+
+        // The settings popup works on a copy, so CANCEL leaves the cue as it was
+        let clockModalClip = null;
+        let clockDraft = null;
+
+        function openClockModal(idx) {
+            const clip = playlist[idx];
+            if (!isClock(clip) || idx === currentIndex) return;
+            clockModalClip = clip;
+            clockDraft = { ...clip.clock, end: clip.endBehavior || 'hold' };
+            document.getElementById('clock-min').value = Math.floor(clockDraft.duration / 60);
+            document.getElementById('clock-sec').value = clockDraft.duration % 60;
+            document.getElementById('clock-target').value = clockDraft.target;
+            document.getElementById('clock-label').value = clockDraft.label || '';
+            renderClockModal();
+            document.getElementById('clock-modal-overlay').style.display = 'flex';
+        }
+
+        function setClockDraft(key, value) {
+            if (!clockDraft) return;
+            clockDraft[key] = value;
+            renderClockModal();
+        }
+
+        // Only the rows for this clock's mode, with the chosen options lit
+        function renderClockModal() {
+            const mode = clockDraft.mode;
+            document.querySelector('.clock-modal-title').textContent = `CLOCK SETTINGS - ${PlaybackClock.modeLabel(mode)}`;
+            document.querySelectorAll('#clock-modal-overlay [data-modes]').forEach(el => {
+                el.style.display = el.dataset.modes.split(' ').includes(mode) ? '' : 'none';
+            });
+            document.querySelectorAll('#clock-modal-overlay .clock-choice').forEach(btn => {
+                const key = ['h24', 'seconds', 'date', 'end'].find(k => btn.dataset[k] !== undefined);
+                const value = btn.dataset[key];
+                const on = key === 'end' ? clockDraft.end === value : String(!!clockDraft[key]) === value;
+                btn.classList.toggle('is-on', on);
+            });
+        }
+
+        function hideClockModal() {
+            clockModalClip = null;
+            clockDraft = null;
+            document.getElementById('clock-modal-overlay').style.display = 'none';
+        }
+
+        function confirmClockModal() {
+            const clip = clockModalClip;
+            const draft = clockDraft;
+            hideClockModal();
+            if (!clip || !draft || !playlist.includes(clip) || playlist.indexOf(clip) === currentIndex) return;
+            const min = Math.max(0, Math.min(5999, parseInt(document.getElementById('clock-min').value, 10) || 0));
+            const sec = Math.max(0, Math.min(59, parseInt(document.getElementById('clock-sec').value, 10) || 0));
+            const target = document.getElementById('clock-target').value;
+            clip.clock = {
+                mode: draft.mode,
+                duration: Math.max(1, min * 60 + sec),
+                target: /^\d{2}:\d{2}$/.test(target) ? target : draft.target,
+                h24: !!draft.h24,
+                seconds: draft.seconds !== false,
+                date: !!draft.date,
+                label: document.getElementById('clock-label').value.trim().toUpperCase().slice(0, 60)
+            };
+            clip.endBehavior = draft.end;
+            updateClockCue(clip);
         }
 
         let uiScale = 2;
@@ -1656,6 +1861,12 @@
         }
 
         function loadClipMetadata(clip, callback) {
+            if (isClock(clip)) {
+                applyClockToCue(clip); // nothing to load: it's drawn from its settings
+                if (callback) callback();
+                renderPlaylist();
+                return;
+            }
             if (clip.pdf) {
                 preparePdfCue(clip, callback);
                 return;
@@ -1749,6 +1960,7 @@
                     url: (c.pattern || c.pdf) ? '' : c.url,
                     pattern: c.pattern,
                     pdf: c.pdf,
+                    clock: c.clock,
                     type: c.type,
                     gain: c.gain !== undefined ? c.gain : 1.0,
                     fadeIn: c.fadeIn !== undefined ? c.fadeIn : 0.0,
@@ -1927,6 +2139,7 @@
                 let iconHtml = videoSvg;
                 if (clip.type === 'image') iconHtml = imageSvg;
                 if (clip.type === 'audio') iconHtml = audioSvg;
+                if (isClock(clip)) iconHtml = clockSvg;
 
                 const isBoosted = clip.gain > 1.0;
                 const cueNumStr = (idx + 1).toString().padStart(2, '0');
@@ -1942,7 +2155,16 @@
                 let badgesHtml = '';
                 let fadeRowHtml = '';
 
-                if (clip.type !== 'image') {
+                if (isClock(clip)) {
+                    // A clock: its mode picker and SET (the settings popup, which also holds AT ZERO)
+                    const endLabel = PlaybackClock.hasEnd(clip.clock) ? ({ hold: 'HOLD', advance: 'ADV', loop: 'LOOP' }[clip.endBehavior] || 'HOLD') : 'HOLD';
+                    badgesHtml = `
+                        <div class="clip-badges">
+                            <button class="cue-select pick-anchor" ${isLive ? 'disabled' : ''} onclick="openClockModeMenu(${idx}, this); this.blur();" title="CLOCK MODE">${PlaybackClock.modeLabel(clip.clock.mode)}</button>
+                            <button class="badge active-${endLabel === 'ADV' ? 'advance' : endLabel === 'LOOP' ? 'loop' : 'hold'}" ${isLive ? 'disabled' : ''} onclick="openClockModal(${idx}); this.blur();" title="CLOCK SETTINGS (AT ZERO: ${endLabel})">SET</button>
+                        </div>
+                    `;
+                } else if (clip.type !== 'image') {
                     badgesHtml = `
                         <div class="clip-badges">
                             <button class="badge ${clip.endBehavior === 'hold' ? 'active-hold' : ''}" ${isLive ? 'disabled' : ''} onclick="setClipBehavior(${idx}, 'hold')">HOLD</button>
@@ -2037,7 +2259,7 @@
                                 <span class="clip-name" title="${escapeHtml(clip.name)}">${escapeHtml(clip.name)}</span>
                             </div>
                             <div class="clip-right-group" onclick="event.stopPropagation()">
-                                ${clip.type === 'image' ? '' : `<div class="clip-controls">
+                                ${clip.type === 'image' || isClock(clip) ? '' : `<div class="clip-controls">
                                     <div class="control-group">
                                         ${volumeSvg}
                                         <input type="range" id="vol-input-${idx}" class="inline-volume ${volumeStateClass(clip.gain)}" min="0" max="200" step="1" value="${gainToFaderPos(clip.gain)}" style="--vol-pct: ${gainToFaderPos(clip.gain) / 2}%" ${isLive ? 'disabled' : ''} oninput="setClipGain(${idx}, this.value)" onchange="this.blur()" onmouseup="this.blur()" ondblclick="resetClipGain(${idx})" title="VOLUME: ${Math.round(clip.gain * 100)}% (DOUBLE-CLICK: 100%)">
@@ -2361,7 +2583,13 @@
 
             const rot = clip.rotation || 0;
 
-            if (clip.type === 'image') {
+            if (isClock(clip)) {
+                // A clock on the CUE monitor: a time of day keeps moving, a countdown shows its full length
+                const canvas = document.getElementById('preview-clock');
+                canvas.style.display = 'block';
+                canvas.style.opacity = '1';
+                previewClock.start(clip.clock, { paused: true });
+            } else if (clip.type === 'image') {
                 prevImg.style.display = 'block';
                 prevImg.style.opacity = '1';
                 prevImg.style.transform = `rotate(${rot}deg)`;
@@ -2440,9 +2668,16 @@
             }
         }
 
+        // null clears the CUE monitor's drawn pictures: the still and a clock (every place that empties the
+        // CUE monitor calls this)
         function showPreviewStill(bitmap, rot = 0) {
             const canvas = document.getElementById('preview-still');
-            if (!bitmap) { canvas.style.display = 'none'; return; }
+            if (!bitmap) {
+                canvas.style.display = 'none';
+                previewClock.stop();
+                document.getElementById('preview-clock').style.display = 'none';
+                return;
+            }
             canvas.width = bitmap.width;
             canvas.height = bitmap.height;
             canvas.getContext('2d').drawImage(bitmap, 0, 0);
@@ -2559,7 +2794,7 @@
         function stepProgramFrame(dir) {
             if (currentIndex === -1 || isKilling) return;
             const clip = playlist[currentIndex];
-            if (!clip || clip.type === 'image' || currentProgramDuration <= 0) return;
+            if (!clip || clip.type === 'image' || isClock(clip) || currentProgramDuration <= 0) return;
             const el = clip.type === 'audio' ? document.getElementById('program-audio') : document.getElementById('program-video');
             // Always PAUSE (harmless if already paused): with the output open the operator's local copy
             // of an audio cue never plays, so its paused flag says nothing about the real program.
@@ -2599,7 +2834,7 @@
         function setCuePoint(which) {
             if (currentIndex === -1 || isKilling) return;
             const clip = playlist[currentIndex];
-            if (!clip || clip.type === 'image' || currentProgramDuration <= 0) return;
+            if (!clip || clip.type === 'image' || isClock(clip) || currentProgramDuration <= 0) return;
             const fd = frameDurByUrl.get(clip.url) || DEFAULT_FRAME_DUR;
             // The middle of the frame on screen, the same spot the frame step buttons land on
             const pos = programPosition(liveProgramEl(clip));
@@ -2666,7 +2901,7 @@
         // IN / OUT buttons (lit when set, time on the button) and the IN-OUT range under the scrub bar
         function updatePointsUi() {
             const clip = currentIndex !== -1 ? playlist[currentIndex] : null;
-            const usable = !!clip && clip.type !== 'image';
+            const usable = !!clip && clip.type !== 'image' && !isClock(clip);
             const inBtn = document.getElementById('btn-in-point');
             const outBtn = document.getElementById('btn-out-point');
             document.querySelectorAll('.frame-row button').forEach(b => { b.disabled = !usable; });
@@ -2711,7 +2946,7 @@
         setInterval(() => {
             if (currentIndex === -1 || isKilling || localEndHandled || programPausedByOperator) return;
             const clip = playlist[currentIndex];
-            if (!clip || clip.type === 'image' || !cueUsesPoints(clip)) return;
+            if (!clip || clip.type === 'image' || isClock(clip) || !cueUsesPoints(clip)) return;
             const el = liveProgramEl(clip);
             if (!el.getAttribute('src') || (el.paused && !el.ended)) return;
             if (el.ended && clip.endBehavior !== 'loop') return;
@@ -2789,10 +3024,36 @@
             if (!isOutputWindowOpen) rampLocalAudio(1, 0);
         }
 
+        // The PGM monitor's clock follows the same transport commands as the output's (clockCommand there)
+        function clockProgramCommand(clip, cmd, val) {
+            const at = { get currentTime() { return programClock.elapsed; }, duration: programClock.duration };
+            if (cmd === 'play') {
+                if (programClock.ended || (programClock.duration > 0 && programClock.elapsed >= programClock.duration)) resetProgramFadeOut();
+                localEndHandled = false;
+                programPausedByOperator = false;
+                programClock.play();
+                const holdBadge = document.getElementById('pgm-hold-badge');
+                if (holdBadge) holdBadge.style.display = 'none';
+                resumeProgramFades(clip, at);
+            } else if (cmd === 'pause') {
+                programPausedByOperator = true;
+                programClock.pause();
+                freezeProgramFades();
+            } else if (cmd === 'seek' || cmd === 'goto-end') {
+                programClock.seek(cmd === 'seek' ? val : Math.max(0, programClock.duration - val));
+                localEndHandled = false;
+                resetProgramFadeOut();
+                const holdBadge = document.getElementById('pgm-hold-badge');
+                if (holdBadge) holdBadge.style.display = 'none';
+            }
+            if (!isOutputWindowOpen) handleTimeUpdate(programClock.elapsed, programClock.duration);
+        }
+
         function sendProgramCommand(cmd, val) {
             ipcRenderer.send('program-command', cmd, val);
             holdProgramSync(500);
             const clip = (currentIndex >= 0) ? playlist[currentIndex] : null;
+            if (isClock(clip)) { clockProgramCommand(clip, cmd, val); return; }
             const el = (clip?.type === 'audio') ? document.getElementById('program-audio') : document.getElementById('program-video');
             if (!el) return;
 
@@ -2863,6 +3124,7 @@
             const progFade = document.getElementById('program-fade-overlay');
             if (progVid) { progVid.pause(); progVid.src = ''; progVid.style.display = 'none'; }
             if (progImg) { progImg.src = ''; progImg.style.display = 'none'; }
+            stopProgramClock();
             if (progAud) { progAud.pause(); progAud.src = ''; }
             if (progFade) { progFade.style.transition = 'none'; progFade.style.opacity = '0'; }
 
@@ -2963,6 +3225,7 @@
             progImg.style.display = 'none';
             progAud.pause();
             progAud.src = '';
+            stopProgramClock();
 
             // Built on TAKE even with the output open, so a later OUTPUT off doesn't reroute playing audio
             initLocalMeter();
@@ -2980,7 +3243,14 @@
             currentProgramDuration = clip.duration || 0;
             programFadeOutStarted = false;
 
-            if (clip.type === 'image') {
+            if (isClock(clip)) {
+                const canvas = document.getElementById('program-clock');
+                canvas.style.display = 'block';
+                canvas.style.opacity = '1';
+                programClock.start(clip.clock);
+                currentProgramDuration = programClock.duration;
+                handleTimeUpdate(0, currentProgramDuration);
+            } else if (clip.type === 'image') {
                 progImg.style.display = 'block';
                 progImg.style.opacity = '1';
                 progImg.style.transform = `rotate(${rot}deg)`;
@@ -3085,7 +3355,8 @@
             el.addEventListener('error', () => {
                 if (isOutputWindowOpen || !el.error) return;
                 const live = playlist[currentIndex];
-                if (!live || el.getAttribute('src') !== live.url) return;
+                // A clock has no file (url ''), which a cleared element (src '') would otherwise match
+                if (!live || !live.url || el.getAttribute('src') !== live.url) return;
                 handleProgramMediaError(live.url, 'FILE MISSING OR UNREADABLE');
             });
         });
@@ -3134,6 +3405,12 @@
             if (!isOutputWindowOpen || currentIndex === -1 || isKilling || Date.now() < pgmSyncHoldUntil) return;
             const clip = playlist[currentIndex];
             if (!clip || clip.type === 'image') return;
+            if (isClock(clip)) {
+                // The PGM clock runs on its own; only a big gap (seen twice) is put right
+                if (programPausedByOperator || programClock.ended) return;
+                if (Math.abs(programClock.elapsed - cur) > 0.75 && ++pgmBigDriftCount >= 2) { programClock.seek(cur); pgmBigDriftCount = 0; }
+                return;
+            }
             const el = liveProgramEl(clip);
             if (el.seeking || el.ended || el.readyState < 2 || localEndHandled) return;
             const drift = el.currentTime - cur;
@@ -3171,6 +3448,13 @@
             if (currentIndex === -1 || isKilling) return;
             const clip = playlist[currentIndex];
             if (!clip || clip.type === 'image') return;
+            // A time of day or count-up has no end: ELAPSED counts from the TAKE, REMAINING stays blank
+            if (isClock(clip) && !(dur > 0)) {
+                currentProgramDuration = 0;
+                document.getElementById('prog-elapsed').innerText = formatTimecode(Math.max(0, cur));
+                document.getElementById('prog-remaining').innerText = '--:--:--';
+                return;
+            }
 
             if (dur && dur !== currentProgramDuration) {
                 currentProgramDuration = dur;
