@@ -85,7 +85,7 @@ The **PATTERN** list next to CLEAR adds a test cue to the cuelist: the bundled *
 **PATTERN → CLOCK** adds a live clock cue. **SET** on the cue opens its settings: the mode, each in its own colour (**TIME OF DAY** in 12H or 24H, with or without seconds and the date; **COUNTDOWN**, a set length from TAKE typed as HH:MM:SS; **COUNTDOWN TO**, a target time of day such as doors at 19:30; or **COUNT UP**), and an optional label above the clock. What a countdown does at zero is set with the cue's HOLD / ADV / LOOP badges, like any cue (a clock with no end only holds). Countdowns turn amber in the last minute and red in the last 10 seconds, and PLAY, PAUSE, GO TO 20 / 10, fades and OUTPUT on / off all work with them.
 
 ### Webcam
-**ADD MEDIA → WEBCAM** adds a live camera cue. Pick the camera on the cue, and a separate **SOUND** input if you want sound (NONE by default), for example a mixer feed instead of the camera's own microphone. Sound goes through the cue's volume fader and the meter. If the camera or sound input isn't connected, the cue turns red and won't TAKE. On a Mac, allow the camera and microphone the first time macOS asks.
+**ADD MEDIA → WEBCAM** opens **WEBCAM SETTINGS**: pick the camera, a separate **SOUND** input if you want sound (NONE by default) and the rotation, then DONE adds the cue. **SET** on the cue opens the same settings later. The SOUND input can be a mixer feed, for example, instead of the camera's own microphone. Sound goes through the cue's volume fader and the meter. If the camera or sound input isn't connected, the cue turns red and won't TAKE. On a Mac, allow the camera and microphone the first time macOS asks.
 
 ### When a cue can't play
 If TAKE is refused (a missing or unplayable file, a web cue with OUTPUT off, a PDF still loading), or a cue fails while on air, a popup names the cue and says why. Enter, Space and Esc keep working with it open, the next TAKE that goes ahead closes it, and the CONSOLE keeps the full list.
@@ -99,10 +99,11 @@ If TAKE is refused (a missing or unplayable file, a web cue with OUTPUT off, a P
 <img src="docs/feature-test-patterns.png" width="738" alt="A generator cue with its pattern list open, showing grid, colour bars, greyscale, checkerboard and solid colours">
 
 ### Starter cues
-A fresh install opens with three test cues made for Playback Joe:
+A fresh install opens with four test cues made for Playback Joe:
 - **Grid - Playback Joe - 1920x1080**: a projector alignment grid with labelled rows and columns, centre cross and circles.
 - **Sync Test - Playback Joe - 1920x1080x30p**: a one-frame flash with a beep every second, alternating left and right, for checking audio/video sync and speaker channels.
 - **Generator - Colour Bars**: a generator cue set to colour bars. Change its pattern or size right on the cue.
+- **Clock - Time of Day**: a live clock. SET changes it to a countdown, a countdown to a set time, or a count-up.
 
 ---
 

@@ -73,7 +73,7 @@
         .clip-badges .cue-select { flex: 2; }
         /* The one dropdown list, used by PATTERN and the pickers above. Drawn by hand because a native
            list's rows can't be given padding */
-        #pick-menu { display: none; position: fixed; z-index: 3000; background: #1f1f1f; border: 1px solid #555; border-radius: 4px; padding: 4px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.6); max-height: 80vh; overflow-y: auto; }
+        #pick-menu { display: none; position: fixed; z-index: 1000000; /* above the popups: settings popups open lists too */ background: #1f1f1f; border: 1px solid #555; border-radius: 4px; padding: 4px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.6); max-height: 80vh; overflow-y: auto; }
         #pick-menu .pick-item { display: block; width: 100%; background: transparent; color: #ddd; border: none; border-radius: 3px; padding: 7px 14px; font-size: 12px; font-weight: bold; letter-spacing: 0.5px; text-align: left; white-space: nowrap; cursor: pointer; outline: none; }
         #pick-menu .pick-item:hover { background: var(--blue); color: #fff; }
         #pick-menu .pick-item.is-current { color: #fff; background: #333; }
@@ -119,14 +119,14 @@
         #clock-modal-overlay .clock-form { min-height: 182px; justify-content: flex-start; }
         /* Every row on one grid: the label column, then four equal columns. Each button takes one column, so
            the choices line up under the modes whatever the mode; the label field spans all four. */
-        #clock-modal-overlay .clock-row { display: grid; grid-template-columns: 96px repeat(4, minmax(0, 1fr)); column-gap: 8px; }
-        #clock-modal-overlay .clock-label { width: auto; white-space: nowrap; }
+        :is(#clock-modal-overlay, #webcam-modal-overlay) .clock-row { display: grid; grid-template-columns: 96px repeat(4, minmax(0, 1fr)); column-gap: 8px; }
+        :is(#clock-modal-overlay, #webcam-modal-overlay) .clock-label { width: auto; white-space: nowrap; }
         /* Every row, field and button exactly 30px tall (the browser's time picker is taller by itself), so
            nothing moves when the mode changes */
-        #clock-modal-overlay .clock-row { height: 30px; min-height: 30px; }
-        #clock-modal-overlay .clock-choice { width: 100%; min-width: 0; height: 30px; padding: 0 4px; box-sizing: border-box; white-space: nowrap; }
-        #clock-modal-overlay .clock-input { width: 100%; height: 30px; padding-top: 0; padding-bottom: 0; box-sizing: border-box; }
-        #clock-modal-overlay .clock-text { grid-column: 2 / -1; }
+        :is(#clock-modal-overlay, #webcam-modal-overlay) .clock-row { height: 30px; min-height: 30px; }
+        :is(#clock-modal-overlay, #webcam-modal-overlay) .clock-choice { width: 100%; min-width: 0; height: 30px; padding: 0 4px; box-sizing: border-box; white-space: nowrap; }
+        :is(#clock-modal-overlay, #webcam-modal-overlay) .clock-input { width: 100%; height: 30px; padding-top: 0; padding-bottom: 0; box-sizing: border-box; }
+        :is(#clock-modal-overlay, #webcam-modal-overlay) .clock-text { grid-column: 2 / -1; }
         /* Each clock mode has its own colour (the badge colours used around the app): the chosen mode and every
            option chosen under it are filled with it */
         #clock-modal-overlay .clock-modal { --mode-color: var(--blue); }
@@ -135,6 +135,14 @@
         #clock-modal-overlay .clock-modal[data-clock-mode="countup"] { --mode-color: #16a34a; }
         #clock-modal-overlay .clock-choice.is-on { background: var(--mode-color); border-color: var(--mode-color); color: #fff; }
         #clock-modal-overlay .clock-time { grid-column: 2 / span 2; }
+        /* WEBCAM SETTINGS: same grid; a device is picked from a list on a full-width field, the chosen option is
+           filled blue */
+        #webcam-modal-overlay .clock-modal { width: 580px; }
+        #webcam-modal-overlay .clock-choice.is-on { background: var(--blue); border-color: var(--blue); color: #fff; }
+        .settings-pick { grid-column: 2 / -1; display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer; text-align: left; text-transform: uppercase; }
+        .settings-pick span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .settings-pick::after { content: '\25BE'; color: #888; flex-shrink: 0; }
+        .settings-pick:hover, .settings-pick:focus { border-color: var(--blue); }
         .clock-label { width: 96px; flex-shrink: 0; color: #aaa; letter-spacing: 0.5px; }
         .clock-unit { color: #888; }
         .clock-input { background: #111; color: #fff; border: 1px solid #444; border-radius: 3px; padding: 6px 8px; font-family: var(--font-mono); font-size: 13px; width: 70px; outline: none; }
@@ -154,7 +162,7 @@
         /* Shown while the output window has the keyboard (a WEBPAGE cue can be typed into there) */
         #output-focus-banner { display: none; position: fixed; top: 0; left: 50%; transform: translateX(-50%); z-index: 99999; background: #b45309; color: #fff; font-size: 11px; font-weight: bold; letter-spacing: 0.5px; padding: 6px 16px; border-radius: 0 0 4px 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.6); pointer-events: none; white-space: nowrap; }
 
-        #credits-modal-overlay, #clear-modal-overlay, #delete-modal-overlay, #reset-points-modal-overlay, #clock-modal-overlay, #web-modal-overlay, #play-error-overlay {
+        #credits-modal-overlay, #clear-modal-overlay, #delete-modal-overlay, #reset-points-modal-overlay, #clock-modal-overlay, #web-modal-overlay, #play-error-overlay, #webcam-modal-overlay {
             position: fixed;
             top: 0; left: 0; width: 100vw; height: 100vh;
             background: rgba(0, 0, 0, 0.75);
@@ -589,6 +597,29 @@
             <div class="clock-buttons">
                 <button class="clock-done" onclick="confirmClockModal(); this.blur();">DONE</button>
                 <button class="clock-cancel" onclick="hideClockModal(); this.blur();">CANCEL</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- WEBCAM cue settings: camera, sound input, rotation. Works on a draft, so CANCEL leaves the cue as it was.
+         Its buttons blur, so Enter / Esc stay TAKE / KILL. -->
+    <div id="webcam-modal-overlay" onclick="hideWebcamModal()">
+        <div class="focus-modal clock-modal" onclick="event.stopPropagation()">
+            <div class="clock-modal-title">WEBCAM SETTINGS</div>
+            <div class="clock-form">
+                <div class="clock-row"><span class="clock-label">CAMERA</span>
+                    <button class="clock-input settings-pick pick-anchor" id="webcam-camera-pick" onclick="pickWebcamDevice('camera', this); this.blur();"><span></span></button></div>
+                <div class="clock-row"><span class="clock-label">SOUND</span>
+                    <button class="clock-input settings-pick pick-anchor" id="webcam-sound-pick" onclick="pickWebcamDevice('sound', this); this.blur();"><span></span></button></div>
+                <div class="clock-row"><span class="clock-label">ROTATION</span>
+                    <button class="clock-choice" data-rotation="0" onclick="setWebcamDraftRotation(0); this.blur();">0°</button>
+                    <button class="clock-choice" data-rotation="90" onclick="setWebcamDraftRotation(90); this.blur();">90°</button>
+                    <button class="clock-choice" data-rotation="180" onclick="setWebcamDraftRotation(180); this.blur();">180°</button>
+                    <button class="clock-choice" data-rotation="270" onclick="setWebcamDraftRotation(270); this.blur();">270°</button></div>
+            </div>
+            <div class="clock-buttons">
+                <button class="clock-done" onclick="confirmWebcamModal(); this.blur();">DONE</button>
+                <button class="clock-cancel" onclick="hideWebcamModal(); this.blur();">CANCEL</button>
             </div>
         </div>
     </div>
@@ -1471,26 +1502,83 @@
             if (!w.audioId) clip.gain = 1.0;
         }
 
-        async function openWebcamCameraMenu(idx, anchor) {
-            const clip = playlist[idx];
-            if (!isWebcam(clip) || idx === currentIndex) return;
-            const { cameras } = await PlaybackWebcam.listDevices();
-            openPickMenu(anchor, [['', 'DEFAULT CAMERA'], ...cameras.map(c => [c.id, c.label])], clip.webcam.videoId, id => {
-                const cam = cameras.find(c => c.id === id);
-                clip.webcam = { ...clip.webcam, videoId: id, videoLabel: cam ? cam.label : '' };
-                updateWebcamCue(clip);
+        // WEBCAM SETTINGS popup: camera, sound input and rotation, for a new cue (ADD MEDIA > WEBCAM, webcamModalClip
+        // null) or an existing one (SET on its row). Works on a draft, so CANCEL leaves everything as it was.
+        let webcamModalClip = null;
+        let webcamDraft = null; // { webcam: { videoId, videoLabel, audioId, audioLabel }, rotation }
+
+        function openWebcamModal(idx) {
+            const clip = idx === undefined || idx === null ? null : playlist[idx];
+            if (clip && (!isWebcam(clip) || idx === currentIndex)) return;
+            if (!clip && isCuelistLocked()) return;
+            webcamModalClip = clip;
+            webcamDraft = {
+                webcam: clip ? { ...clip.webcam } : { videoId: '', videoLabel: '', audioId: '', audioLabel: '' },
+                rotation: clip ? (clip.rotation || 0) : 0
+            };
+            renderWebcamModal();
+            document.getElementById('webcam-modal-overlay').style.display = 'flex';
+        }
+
+        function renderWebcamModal() {
+            const w = webcamDraft.webcam;
+            document.querySelector('#webcam-camera-pick span').textContent = w.videoLabel || 'DEFAULT CAMERA';
+            document.querySelector('#webcam-sound-pick span').textContent = w.audioId ? (w.audioLabel || 'INPUT') : 'NONE';
+            document.querySelectorAll('#webcam-modal-overlay [data-rotation]').forEach(btn => {
+                btn.classList.toggle('is-on', Number(btn.dataset.rotation) === webcamDraft.rotation);
             });
         }
 
-        async function openWebcamSoundMenu(idx, anchor) {
-            const clip = playlist[idx];
-            if (!isWebcam(clip) || idx === currentIndex) return;
-            const { mics } = await PlaybackWebcam.listDevices();
-            openPickMenu(anchor, [['', 'NONE'], ...mics.map(m => [m.id, m.label])], clip.webcam.audioId, id => {
-                const mic = mics.find(m => m.id === id);
-                clip.webcam = { ...clip.webcam, audioId: id, audioLabel: mic ? mic.label : '' };
+        // The device lists open the camera and microphone once (to read their names), so they're fetched on click
+        async function pickWebcamDevice(kind, anchor) {
+            if (!webcamDraft) return;
+            const { cameras, mics } = await PlaybackWebcam.listDevices();
+            if (!webcamDraft) return;
+            const w = webcamDraft.webcam;
+            if (kind === 'camera') {
+                openPickMenu(anchor, [['', 'DEFAULT CAMERA'], ...cameras.map(c => [c.id, c.label])], w.videoId, id => {
+                    const cam = cameras.find(c => c.id === id);
+                    if (webcamDraft) webcamDraft.webcam = { ...webcamDraft.webcam, videoId: id, videoLabel: cam ? cam.label : '' };
+                    if (webcamDraft) renderWebcamModal();
+                });
+            } else {
+                openPickMenu(anchor, [['', 'NONE'], ...mics.map(m => [m.id, m.label])], w.audioId, id => {
+                    const mic = mics.find(m => m.id === id);
+                    if (webcamDraft) webcamDraft.webcam = { ...webcamDraft.webcam, audioId: id, audioLabel: mic ? mic.label : '' };
+                    if (webcamDraft) renderWebcamModal();
+                });
+            }
+        }
+
+        function setWebcamDraftRotation(rotation) {
+            if (!webcamDraft) return;
+            webcamDraft.rotation = rotation;
+            renderWebcamModal();
+        }
+
+        function hideWebcamModal() {
+            webcamModalClip = null;
+            webcamDraft = null;
+            closePickMenu();
+            document.getElementById('webcam-modal-overlay').style.display = 'none';
+        }
+
+        function confirmWebcamModal() {
+            const clip = webcamModalClip;
+            const draft = webcamDraft;
+            hideWebcamModal();
+            if (!draft) return;
+            if (clip) {
+                if (!playlist.includes(clip) || playlist.indexOf(clip) === currentIndex) return;
+                clip.webcam = draft.webcam;
+                clip.rotation = draft.rotation;
                 updateWebcamCue(clip);
-            });
+                return;
+            }
+            if (isCuelistLocked()) return;
+            const cue = { type: 'image', gain: 1.0, fadeIn: 0.0, fadeOut: 0.0, rotation: draft.rotation, endBehavior: 'hold', webcam: draft.webcam };
+            applyWebcamToCue(cue);
+            finishAddingCue(cue);
         }
 
         function updateWebcamCue(clip) {
@@ -1979,9 +2067,7 @@
                 return;
             }
             if (choice === 'webcam') {
-                const clip = { ...base, webcam: { videoId: '', videoLabel: '', audioId: '', audioLabel: '' } };
-                applyWebcamToCue(clip);
-                finishAddingCue(clip);
+                openWebcamModal(null); // camera and sound are chosen first; DONE adds the cue
                 return;
             }
             if (choice === 'generator') {
@@ -2703,9 +2789,12 @@
                     badgesHtml = `
                         <div class="clip-badges">
                             <button class="badge active-hold badge-fixed" title="PHOTOS ALWAYS HOLD">HOLD</button>
-                            ${clip.pattern ? `<button class="cue-select pick-anchor" ${isLive ? 'disabled' : ''} onclick="openPatternKindMenu(${idx}, this); this.blur();" title="TEST PATTERN">${(PATTERN_KINDS.find(k => k[0] === clip.pattern.kind) || [])[1] || ''}</button>` : isWebcam(clip) ? `<button class="cue-select pick-anchor" ${isLive ? 'disabled' : ''} onclick="openWebcamCameraMenu(${idx}, this); this.blur();" title="CAMERA: ${escapeHtml(clip.webcam.videoLabel || 'DEFAULT CAMERA')}">${escapeHtml(clip.webcam.videoLabel || 'DEFAULT CAMERA')}</button>` : clip.pdf ? `<button class="cue-select pick-anchor" onclick="openPdfPageMenu(${idx}, this); this.blur();" title="GO TO PAGE">${clip.pdf.page} / ${clip.pdf.pages}</button>` : `<span class="badge slot-spacer" aria-hidden="true"></span>
+                            ${clip.pattern ? `<button class="cue-select pick-anchor" ${isLive ? 'disabled' : ''} onclick="openPatternKindMenu(${idx}, this); this.blur();" title="TEST PATTERN">${(PATTERN_KINDS.find(k => k[0] === clip.pattern.kind) || [])[1] || ''}</button>` : clip.pdf ? `<button class="cue-select pick-anchor" onclick="openPdfPageMenu(${idx}, this); this.blur();" title="GO TO PAGE">${clip.pdf.page} / ${clip.pdf.pages}</button>` : `<span class="badge slot-spacer" aria-hidden="true"></span>
                             <span class="badge slot-spacer" aria-hidden="true"></span>`}
-                            <button class="badge ${rotVal > 0 ? 'active-rot' : ''}" ${isLive ? 'disabled' : ''} onclick="cycleClipRotation(${idx})" title="ROTATION: ${rotVal}° (CLICK TO TURN 90°)">${rotVal > 0 ? `${rotVal}°` : rotateSvg}</button>
+                            ${isWebcam(clip)
+                                // A webcam: SET (camera, sound, rotation) in the rotation slot, like a clock
+                                ? `<button class="badge start-toggle" ${isLive ? 'disabled' : ''} onclick="openWebcamModal(${idx}); this.blur();" title="WEBCAM SETTINGS">SET</button>`
+                                : `<button class="badge ${rotVal > 0 ? 'active-rot' : ''}" ${isLive ? 'disabled' : ''} onclick="cycleClipRotation(${idx})" title="ROTATION: ${rotVal}° (CLICK TO TURN 90°)">${rotVal > 0 ? `${rotVal}°` : rotateSvg}</button>`}
                         </div>
                     `;
                 }
@@ -2745,14 +2834,6 @@
                             <span>OUT:</span>
                             <input type="range" class="${clip.fadeOut > 0 ? 'fade-active' : ''}" style="--fade-pct: ${clip.fadeOut / 5 * 100}%" min="0" max="5" step="0.5" value="${clip.fadeOut}" ${isLive ? 'disabled' : ''} oninput="setClipFade(${idx}, 'fadeOut', this.value, this)" onchange="this.blur()" onmouseup="this.blur()" ondblclick="resetClipFade(${idx}, 'fadeOut', this)" title="DOUBLE-CLICK: 0.0S">
                             <span id="fadeout-val-${idx}">${clip.fadeOut.toFixed(1)}S</span>
-                        </div>
-                    `;
-                } else if (isWebcam(clip)) {
-                    // A webcam has no end, so its SOUND input picker takes the place of FADE OUT
-                    fadeControlsHtml += `
-                        <div class="fade-group fade-slot">
-                            <span>SOUND:</span>
-                            <button class="cue-select pick-anchor" ${isLive ? 'disabled' : ''} onclick="openWebcamSoundMenu(${idx}, this); this.blur();" title="SOUND INPUT: ${escapeHtml(clip.webcam.audioLabel || 'NONE')}">${escapeHtml(clip.webcam.audioId ? (clip.webcam.audioLabel || 'INPUT') : 'NONE')}</button>
                         </div>
                     `;
                 } else {

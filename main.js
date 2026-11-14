@@ -1313,6 +1313,18 @@ function loadStarterCues() {
             rotation: 0,
             endBehavior: 'hold'
         });
+        // And a clock (time of day, the clock.js defaults), so a new install shows every generated source
+        cues.push({
+            originalName: 'CLOCK - TIME OF DAY',
+            url: '',
+            type: 'clock',
+            clock: { mode: 'time', duration: 300, target: '19:30', h24: false, seconds: true, date: false, label: '' },
+            gain: 1.0,
+            fadeIn: 0.0,
+            fadeOut: 0.0,
+            rotation: 0,
+            endBehavior: 'hold'
+        });
         return cues;
     } catch (err) {
         console.error('Failed to load starter cues:', err);
