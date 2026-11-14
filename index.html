@@ -561,6 +561,7 @@
                 <div class="header-actions">
                     <button class="btn-fs-top pick-anchor" id="btn-ui-scale" onclick="openUiScaleMenu(this); this.blur();" title="INTERFACE SIZE (OPERATOR WINDOW ONLY)">SIZE</button>
                     <button class="btn-fs-top" id="btn-console" onclick="toggleErrorConsole(); this.blur();">CONSOLE</button>
+                    <button class="btn-fs-top pick-anchor" id="btn-output-display" onclick="openDisplayMenu(this); this.blur();" title="WHICH SCREEN GETS THE OUTPUT">DISPLAY</button>
                     <button class="btn-fs-top output-active" id="btn-output-toggle" onclick="toggleOutputWindow(); this.blur();">OUTPUT</button>
                     <button class="btn-fs-top fullscreen-active" id="btn-fullscreen-toggle" onclick="toggleFullscreen(); this.blur();">⛶ &nbsp; FULLSCREEN</button>
                 </div>
@@ -1485,6 +1486,16 @@
         }
 
         let uiScale = 2;
+
+        // DISPLAY: which screen gets the output. AUTO uses the second screen when there is one. Choosing a screen
+        // moves the output there straight away (filling it, or as the small window on the console's screen); a
+        // playing cue carries on.
+        async function openDisplayMenu(anchor) {
+            const info = await api.getDisplays?.();
+            if (!info) return;
+            const items = [['auto', 'AUTO (SECOND SCREEN)'], ...info.displays.map(d => [d.id, d.label])];
+            openPickMenu(anchor, items, info.chosen ?? 'auto', id => api.setOutputDisplay?.(id === 'auto' ? null : id));
+        }
 
         function openUiScaleMenu(anchor) {
             openPickMenu(anchor, [[1, 'SMALL'], [2, 'DEFAULT'], [3, 'LARGE']], uiScale, level => {

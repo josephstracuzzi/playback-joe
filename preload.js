@@ -14,6 +14,13 @@ contextBridge.exposeInMainWorld('playbackAPI', {
     // Window Controls
     toggleOutputWindow: (opts) => ipcRenderer.send('toggle-output-window', opts),
     toggleFullscreen: () => ipcRenderer.send('toggle-fullscreen'),
+    getDisplays: () => ipcRenderer.invoke('get-displays'),
+    setOutputDisplay: (id) => ipcRenderer.send('set-output-display', id),
+    onOutputWindowed: (callback) => {
+        const handler = (event, windowed) => callback(windowed);
+        ipcRenderer.on('output-windowed', handler);
+        return () => ipcRenderer.removeListener('output-windowed', handler);
+    },
     
     // Playback Engine Commands
     cueVideo: (clip) => ipcRenderer.send('cue-video', clip),

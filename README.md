@@ -31,7 +31,10 @@ Your settings, your autosaved cuelist and the starter clips are kept in your app
 ### Two windows, one show
 - **Operator console** with the cuelist, a **CUE** monitor (what's next) and a **PGM** monitor (what's live).
 - **Output window** that shows only your media, with no borders or controls. With a second display connected it opens fullscreen there automatically. On a single screen it opens as a 16:9 window you can move around.
+- **FULLSCREEN** switches the output instantly between filling its screen and a small 16:9 window, without reloading, so a playing cue carries on.
+- **DISPLAY** picks which screen gets the output (AUTO uses the second screen).
 - Plug in or unplug a projector mid-show and the output moves to the right screen without stopping playback.
+- At launch the console and the output appear together, once both are ready, so nothing half-drawn flashes on the projector.
 
 ### Cuelist
 - Add video, audio, images and PDFs: **MP4, M4V, MOV, WEBM, MP3, WAV, AAC, M4A, FLAC, OGG, JPG, PNG, GIF, WEBP, BMP, PDF**. See [Supported formats](#-supported-formats) for which codecs play.

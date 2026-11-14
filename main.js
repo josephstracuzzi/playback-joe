@@ -114,14 +114,90 @@ function applyUiScale(level) {
     }
 }
 
-// Windowed output is locked to 16:9 (resize drags keep the ratio). Fullscreen is left free so the
-// output always fills its display. On leaving fullscreen the window is snapped to 16:9 inside its
-// current bounds and the display's work area, so a 16:10 or 4:3 screen can't leave it stretched.
+// ---- Output placement ----
+// "Fullscreen" output is not the operating system's own fullscreen (on Windows it shows its old size for a moment
+// when leaving and has to be left before it can change screens; on a Mac it opens its own Space and can leave the
+// menu bar showing). It's the borderless output window sized exactly to its screen, so each switch is one move and
+// resize: it pops in and out in place, never reloads, and a playing cue carries on. While it fills a screen it
+// can't be moved or resized; on a screen other than the console's it's kept above the taskbar (and the Mac menu
+// bar). Same approach as Clean Notes Joe 0.11.
 const OUTPUT_ASPECT = 16 / 9;
+let outputDisplayId = null;      // chosen with DISPLAY (settings.json); null = the second screen if there is one
+let outputWantsWindow = false;   // the operator turned FULLSCREEN off (not just a screen going away)
 
+function targetDisplay() {
+    const displays = screen.getAllDisplays();
+    const chosen = displays.find(d => d.id === outputDisplayId);
+    if (chosen) return chosen;
+    const primary = screen.getPrimaryDisplay();
+    return displays.find(d => d.id !== primary.id) || primary;
+}
+
+// Where the output belongs for the displays connected right now: filling a screen other than the console's, or a
+// 16:9 window in the corner of the console's screen (FULLSCREEN can still fill it). Turned off with FULLSCREEN, it
+// stays a window wherever it is.
+function getOutputLayout() {
+    const display = targetDisplay();
+    if (display.id !== screen.getPrimaryDisplay().id && !outputWantsWindow) {
+        return { fullscreen: true, display, bounds: { ...display.bounds } };
+    }
+    return { fullscreen: false, display, bounds: windowedCorner(display) };
+}
+
+// The windowed output: 854 x 480 (16:9), or smaller on a small screen. Top-left of its screen; top-right of the
+// console's screen, clear of the console.
+function windowedCorner(display) {
+    const workArea = display.workArea;
+    const width = Math.min(854, workArea.width);
+    const height = Math.round(width * 9 / 16);
+    const onMain = display.id === screen.getPrimaryDisplay().id;
+    return { x: onMain ? workArea.x + workArea.width - width : workArea.x, y: workArea.y, width, height };
+}
+
+function consoleToFront() {
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) mainWindow.moveTop();
+}
+
+function isFilling(win) {
+    return !!win && !win.isDestroyed() && win.pjFilling === true;
+}
+
+// Puts the output in its place: filling a display (fill true), or a window at these bounds (fill false)
+function placeOutputWindow(win, fill, displayOrBounds) {
+    if (!win || win.isDestroyed()) return;
+    win.pjFilling = fill;
+    if (fill) {
+        const display = displayOrBounds;
+        win.setAspectRatio(0);
+        win.setResizable(false);
+        win.setMovable(false);
+        win.setAlwaysOnTop(display.id !== screen.getPrimaryDisplay().id, 'screen-saver');
+        win.setBounds(display.bounds);
+    } else {
+        win.setAlwaysOnTop(false);
+        win.setResizable(true);
+        win.setMovable(true);
+        win.setBounds(displayOrBounds);
+        applyOutputAspect(win);
+        // On the console's screen it goes behind the console
+        if (screen.getDisplayMatching(win.getBounds()).id === screen.getPrimaryDisplay().id) consoleToFront();
+        // Windows can nudge a window that has just become movable again: check its place a moment later
+        const want = win.getBounds();
+        setTimeout(() => {
+            if (win.isDestroyed() || isFilling(win)) return;
+            const b = win.getBounds();
+            if (b.x !== want.x || b.y !== want.y) win.setBounds(want);
+        }, 100);
+    }
+    win.webContents.send('output-windowed', !fill); // drag-to-move only while windowed
+    sendOutputStatus(win);
+}
+
+// Windowed output is locked to 16:9 (resize drags keep the ratio) and snapped to 16:9 inside its bounds and the
+// display's work area, so a 16:10 or 4:3 screen can't leave it stretched. Filling a screen, it's free.
 function applyOutputAspect(win) {
     if (!win || win.isDestroyed()) return;
-    if (win.isFullScreen()) {
+    if (isFilling(win)) {
         win.setAspectRatio(0);
         return;
     }
@@ -141,30 +217,10 @@ function applyOutputAspect(win) {
     }
 }
 
-// Where the output belongs for the displays connected right now.
-// Dual display: fullscreen on the second display. Single display: a 16:9 window in the top-right
-// corner of the main screen, so it doesn't cover the operator console (top-left).
-function getOutputLayout() {
-    const displays = screen.getAllDisplays();
-    const primaryDisplay = screen.getPrimaryDisplay();
-    const secondaryDisplay = displays.find(d => d.id !== primaryDisplay.id);
-    if (displays.length > 1 && secondaryDisplay) {
-        return { fullscreen: true, display: secondaryDisplay, bounds: { ...secondaryDisplay.bounds } };
-    }
-    const workArea = primaryDisplay.workArea;
-    const width = Math.min(854, workArea.width);
-    const height = Math.round(width * 9 / 16);
-    return {
-        fullscreen: false,
-        display: primaryDisplay,
-        bounds: { x: workArea.x + workArea.width - width, y: workArea.y, width, height }
-    };
-}
-
 function sendOutputStatus(win) {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     const isOpen = !!win && !win.isDestroyed();
-    mainWindow.webContents.send('output-window-status', { isOpen, isFullScreen: isOpen && win.isFullScreen() });
+    mainWindow.webContents.send('output-window-status', { isOpen, isFullScreen: isOpen && isFilling(win) });
 }
 
 // Messages for the operator's console (shown red, and the CONSOLE button turns red)
@@ -200,42 +256,46 @@ function recoverOutputWindow(win, what) {
     setImmediate(() => { if (!outputWindow) createOutputWindow(); });
 }
 
-// ---- Display connected / disconnected ----
-// Re-place the output when displays change: projector unplugged -> windowed on the main screen
-// (playback keeps running); projector plugged back in -> fullscreen on it again.
+// ---- Display connected / disconnected / changed ----
+// The output moves straight to its new place in one step (playback keeps running): projector unplugged -> a
+// window on the main screen; plugged back in -> filling it again (or a window, if FULLSCREEN was turned off).
 let displayChangeTimer = null;
-
-function outputIsPlacedFor(win, layout) {
-    const current = screen.getDisplayMatching(win.getBounds());
-    if (layout.fullscreen) return win.isFullScreen() && current.id === layout.display.id;
-    return !win.isFullScreen() && current.id === layout.display.id;
-}
+let displayCount = 0;
 
 function moveOutputTo(win, layout) {
-    const apply = () => {
-        if (win.isDestroyed()) return;
-        win.setBounds(layout.bounds);
-        if (layout.fullscreen) win.setFullScreen(true);
-        else applyOutputAspect(win);
-        sendOutputStatus(win);
-    };
-    if (win.isFullScreen()) {
-        win.once('leave-full-screen', () => setTimeout(apply, 250));
-        win.setFullScreen(false);
-    } else {
-        apply();
-    }
+    placeOutputWindow(win, layout.fullscreen, layout.fullscreen ? layout.display : layout.bounds);
+}
+
+// DISPLAY changed: filling the new screen, or the small window in its corner if that's the console's screen or
+// FULLSCREEN was turned off
+function placeOutput() {
+    const win = outputWindow;
+    if (!win || win.isDestroyed()) return;
+    moveOutputTo(win, getOutputLayout());
 }
 
 function handleDisplaysChanged() {
     const win = outputWindow;
     if (!win || win.isDestroyed()) return;
     const layout = getOutputLayout();
-    if (outputIsPlacedFor(win, layout)) return;
-    notifyOperator(layout.fullscreen
-        ? 'SECOND DISPLAY CONNECTED. OUTPUT MOVED TO IT IN FULLSCREEN.'
-        : 'OUTPUT DISPLAY DISCONNECTED. OUTPUT MOVED TO A WINDOW ON THIS SCREEN. PLAYBACK CONTINUES.');
-    moveOutputTo(win, layout);
+    const current = screen.getDisplayMatching(win.getBounds());
+    const count = screen.getAllDisplays().length;
+    const changed = count !== displayCount;
+    const lostScreen = count < displayCount;
+    displayCount = count;
+    const sameScreen = current.id === layout.display.id;
+    if (sameScreen && !changed) {
+        // No screen added or removed (a resolution change...): FULLSCREEN stays as it was; filling a screen
+        // whose size changed, it fills it again
+        if (isFilling(win) && JSON.stringify(win.getBounds()) !== JSON.stringify(current.bounds)) placeOutputWindow(win, true, current);
+    } else if (!(sameScreen && isFilling(win) === layout.fullscreen) || (lostScreen && !layout.fullscreen)) {
+        // A screen switched off: Windows drops the output onto a remaining screen by itself (top-left), so a
+        // windowed output is put back in its corner even when it's already on the right screen
+        notifyOperator(lostScreen
+            ? 'OUTPUT DISPLAY DISCONNECTED. OUTPUT MOVED TO A WINDOW ON THIS SCREEN. PLAYBACK CONTINUES.'
+            : `DISPLAY CONNECTED. OUTPUT MOVED TO IT ${layout.fullscreen ? 'IN FULLSCREEN' : 'AS A WINDOW'}.`);
+        moveOutputTo(win, layout);
+    }
 }
 
 function watchDisplays() {
@@ -244,11 +304,39 @@ function watchDisplays() {
         if (displayChangeTimer) clearTimeout(displayChangeTimer);
         displayChangeTimer = setTimeout(() => { displayChangeTimer = null; handleDisplaysChanged(); }, 1000);
     };
+    displayCount = screen.getAllDisplays().length;
     screen.on('display-added', onChange);
     screen.on('display-removed', onChange);
+    screen.on('display-metrics-changed', onChange);
 }
 
-function createOutputWindow() {
+// ---- Launch reveal ----
+// At launch the console and the output are shown see-through and wait for each other, then appear together once
+// both have drawn, so nothing half-drawn flashes on the projector. Only at launch: an output opened later (OUTPUT
+// on, including a hand-back mid-cue, or a crash restart) is shown at once, so it's visible before it starts the cue.
+let launchReveal = null;
+
+function windowReady(name, win) {
+    if (!launchReveal) {
+        setTimeout(() => { if (!win.isDestroyed()) win.setOpacity(1); }, 250);
+        return;
+    }
+    launchReveal.windows.push(win);
+    launchReveal.pending.delete(name);
+    if (!launchReveal.pending.size) revealWindows();
+}
+
+function revealWindows() {
+    if (!launchReveal) return;
+    clearTimeout(launchReveal.timer);
+    const ready = launchReveal.windows;
+    launchReveal = null;
+    consoleToFront(); // a windowed output on the console's screen goes behind it
+    setTimeout(() => ready.forEach(w => { if (!w.isDestroyed()) w.setOpacity(1); }), 250);
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.focus();
+}
+
+function createOutputWindow({ reveal = false } = {}) {
     const layout = getOutputLayout();
     const version = app.getVersion();
 
@@ -258,9 +346,14 @@ function createOutputWindow() {
         autoHideMenuBar: true,
         backgroundColor: '#000000',
         icon: APP_ICON,
-        fullscreen: layout.fullscreen,
+        // Windowed, it can be dragged anywhere on it (output.html) and resized from its edges, staying 16:9.
+        // Filling a screen (placeOutputWindow), it can't be moved or resized. Never the OS's own fullscreen.
         resizable: true,
         movable: true,
+        maximizable: false,
+        fullscreenable: false,
+        enableLargerThanScreen: true, // macOS: lets it cover the menu bar's strip when filling a screen
+        show: !reveal, // at launch it appears with the console (launch reveal)
         ...layout.bounds,
         webPreferences: {
             nodeIntegration: false,
@@ -277,10 +370,10 @@ function createOutputWindow() {
     outputWindow.loadFile(path.join(__dirname, 'output.html'));
 
     const win = outputWindow;
-    applyOutputAspect(win);
-    win.on('enter-full-screen', () => { applyOutputAspect(win); sendOutputStatus(win); });
-    // Windows restores the pre-fullscreen bounds just after this event, so snap once that has settled
-    win.on('leave-full-screen', () => setTimeout(() => { applyOutputAspect(win); sendOutputStatus(win); }, 150));
+    placeOutputWindow(win, layout.fullscreen, layout.fullscreen ? layout.display : layout.bounds);
+    // Never maximized (a double-click on the drag area would otherwise do it); FULLSCREEN fills the screen.
+    // In case Windows maximizes it anyway, put it straight back.
+    win.on('maximize', () => win.unmaximize());
 
     // Crash: the page's process died (anything but a normal shutdown)
     win.webContents.on('render-process-gone', (event, details) => {
@@ -327,17 +420,37 @@ function createOutputWindow() {
     });
 
     win.webContents.on('did-finish-load', () => {
+        win.webContents.send('output-windowed', !isFilling(win));
         sendOutputStatus(win);
-        // The page is listening now (the status above can also fire earlier, on entering fullscreen)
+        // The page is listening now (the status above can also fire earlier)
         if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('output-ready');
+        // Launch reveal: shown see-through without taking the focus, then together with the console
+        if (reveal) setTimeout(() => {
+            if (win.isDestroyed() || win.isVisible()) return;
+            win.setOpacity(0);
+            win.showInactive();
+            windowReady('output', win);
+        }, 250);
     });
 }
 
 function createWindow() {
     const primaryDisplay = screen.getPrimaryDisplay();
+    const settings = loadSettings();
+    outputDisplayId = Number.isFinite(settings.outputDisplayId) ? settings.outputDisplayId : null;
 
-    // OUTPUT comes back the way it was left (on unless it was switched off last session)
-    if (loadSettings().outputOpen !== false) createOutputWindow();
+    // OUTPUT comes back the way it was left (on unless it was switched off last session). Both windows appear
+    // together once drawn; after 6 s whatever is ready is shown anyway.
+    const outputOn = settings.outputOpen !== false;
+    launchReveal = { pending: new Set(outputOn ? ['console', 'output'] : ['console']), windows: [], timer: null };
+    launchReveal.timer = setTimeout(() => {
+        const r = launchReveal;
+        if (!r) return;
+        revealWindows();
+        BrowserWindow.getAllWindows().forEach(w => { if (!w.isVisible()) { w.setOpacity(1); w.showInactive(); } });
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.focus();
+    }, 6000);
+    if (outputOn) createOutputWindow({ reveal: true });
     watchDisplays();
 
     uiScaleLevel = readSavedUiScale();
@@ -345,6 +458,8 @@ function createWindow() {
         title: 'PLAYBACK JOE ' + app.getVersion() + ' - OPERATOR',
         icon: APP_ICON,
         autoHideMenuBar: true,
+        show: false, // launch reveal
+        backgroundColor: '#111111',
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
@@ -370,6 +485,13 @@ function createWindow() {
         sendOutputStatus(outputWindow);
         // Chromium can bring back an older zoom on load, so the saved scale is set again here
         mainWindow.webContents.setZoomFactor(UI_SCALES[uiScaleLevel]);
+        // Launch reveal: shown see-through, then together with the output
+        setTimeout(() => {
+            if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isVisible()) return;
+            mainWindow.setOpacity(0);
+            mainWindow.show();
+            windowReady('console', mainWindow);
+        }, 250);
     });
 
     mainWindow.on('closed', () => {
@@ -587,16 +709,35 @@ ipcMain.on('toggle-output-window', (event, opts) => {
     }
 });
 
+// FULLSCREEN: the output fills the screen it's on, or becomes the 854 x 480 window in that screen's corner
+// (top-left; top-right on the console's screen). One step, no reload.
 ipcMain.on('toggle-fullscreen', (event) => {
     if (!fromOperator(event)) return;
-    if (outputWindow && !outputWindow.isDestroyed()) {
-        const isFS = outputWindow.isFullScreen();
-        outputWindow.setFullScreen(!isFS);
-        if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('output-window-status', { isOpen: true, isFullScreen: !isFS });
-            mainWindow.focus();
-        }
-    }
+    const win = outputWindow;
+    if (!win || win.isDestroyed()) return;
+    const goFull = !isFilling(win);
+    outputWantsWindow = !goFull;
+    const display = screen.getDisplayMatching(win.getBounds());
+    placeOutputWindow(win, goFull, goFull ? display : windowedCorner(display));
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.focus();
+});
+
+// DISPLAY: which screen gets the output. null = automatic (the second screen if there is one).
+ipcMain.handle('get-displays', (event) => {
+    if (!fromOperator(event)) return null;
+    const primary = screen.getPrimaryDisplay();
+    return {
+        chosen: outputDisplayId,
+        current: outputWindow && !outputWindow.isDestroyed() ? screen.getDisplayMatching(outputWindow.getBounds()).id : null,
+        displays: screen.getAllDisplays().map((d, i) => ({ id: d.id, label: `${i + 1}: ${d.bounds.width}X${d.bounds.height}${d.id === primary.id ? ' (MAIN)' : ''}` }))
+    };
+});
+
+ipcMain.on('set-output-display', (event, id) => {
+    if (!fromOperator(event)) return;
+    outputDisplayId = screen.getAllDisplays().some(d => d.id === id) ? id : null;
+    saveSettings({ outputDisplayId });
+    placeOutput();
 });
 
 ipcMain.on('cue-video', (event, clip) => {
