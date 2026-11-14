@@ -849,6 +849,14 @@ ipcMain.on('output-resumed', (event, token) => {
     }
 });
 
+// The staged cue is a webcam (or null: it isn't): the output opens that camera ahead, hidden, so TAKE is instant
+ipcMain.on('prepare-webcam', (event, webcam) => {
+    if (!fromOperator(event)) return;
+    if (outputWindow && !outputWindow.isDestroyed()) {
+        outputWindow.webContents.send('prepare-webcam', webcam ? cleanWebcam(webcam) : null);
+    }
+});
+
 // A live PDF cue changed page: straight to the output, as the operator already has the picture
 ipcMain.on('show-page', (event, url) => {
     if (!fromOperator(event) || !isPatternPicture(url)) return;

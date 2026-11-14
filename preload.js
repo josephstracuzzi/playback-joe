@@ -47,6 +47,12 @@ contextBridge.exposeInMainWorld('playbackAPI', {
     readPdf: (url) => ipcRenderer.invoke('read-pdf', url),
     probeVideoTrack: (url) => ipcRenderer.invoke('probe-video-track', url),
     showPage: (url) => ipcRenderer.send('show-page', url),
+    prepareWebcam: (webcam) => ipcRenderer.send('prepare-webcam', webcam),
+    onPrepareWebcam: (callback) => {
+        const handler = (event, webcam) => callback(webcam);
+        ipcRenderer.on('prepare-webcam', handler);
+        return () => ipcRenderer.removeListener('prepare-webcam', handler);
+    },
     onShowPage: (callback) => {
         const handler = (event, url) => callback(url);
         ipcRenderer.on('show-page', handler);

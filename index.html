@@ -2701,12 +2701,18 @@
             appendConsoleLog(`Imported cuelist with ${playlist.length} cues.`, false);
         }
 
+        // A staged webcam cue's camera is opened ahead on the output (hidden), so its TAKE is instant
+        function prepareStagedWebcam(clip) {
+            api.prepareWebcam?.(isWebcam(clip) && !clip.mediaError ? clip.webcam : null);
+        }
+
         function selectClip(idx) {
             if (idx < 0 || idx >= playlist.length) return;
             stagedIndex = idx;
             renderPlaylist();
 
             const clip = playlist[idx];
+            prepareStagedWebcam(clip);
             const prevVid = document.getElementById('preview-video');
             const prevImg = document.getElementById('preview-image');
             const prevAud = document.getElementById('preview-audio');
@@ -3455,6 +3461,9 @@
                 progFade.style.opacity = '0';
             }
 
+            // Tell the output what's next before the TAKE reaches it, so a webcam going off air that's staged
+            // again stays open (cutting back and forth) instead of closing and reopening
+            prepareStagedWebcam(playlist.length > 1 ? playlist[(currentIndex + 1) % playlist.length] : null);
             ipcRenderer.send('cue-video', clip);
 
             // Auto stage next cue

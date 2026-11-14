@@ -340,11 +340,67 @@
         let camStream = null;
         let camSource = null;
         let camToken = 0;
+        // Opening a camera takes about 0.4 s, so while a webcam cue is staged (next) its camera is opened here
+        // ahead, hidden (warm), and TAKE switches to it at once. A camera going off air is kept warm when the
+        // staged cue uses it again (cutting back and forth). Only the staged camera is kept: nothing else.
+        let warm = null;          // { key, stream }
+        let preparedKey = null;   // the staged cue's camera (and sound), or null
+        let warmToken = 0;
+
+        const camKey = w => w ? `${w.videoId}|${w.audioId}` : null;
+        const isLive = s => !!s && s.getVideoTracks().some(t => t.readyState === 'live');
+
+        let retiring = null;      // a warm camera no longer staged, kept 1.5 s for a TAKE that's on its way
+        let retireTimer = null;
+
+        function dropWarm() {
+            warmToken++;
+            if (warm) PlaybackWebcam.stop(warm.stream);
+            warm = null;
+        }
+
+        // On TAKE the console says what's staged next just before the TAKE itself arrives, so a warm camera
+        // that stops being staged is kept a moment instead of being closed under the TAKE that needs it
+        function retireWarm() {
+            if (!warm) return;
+            if (retiring) PlaybackWebcam.stop(retiring.stream);
+            retiring = warm;
+            warm = null;
+            warmToken++;
+            clearTimeout(retireTimer);
+            retireTimer = setTimeout(() => { if (retiring) PlaybackWebcam.stop(retiring.stream); retiring = null; }, 1500);
+        }
+
+        api?.onPrepareWebcam?.(async (webcam) => {
+            preparedKey = camKey(webcam);
+            if (!webcam) { retireWarm(); return; }
+            if (warm && warm.key === preparedKey && isLive(warm.stream)) return;
+            if (camStream && camKey(currentClip?.webcam) === preparedKey) { retireWarm(); return; } // it's on air now
+            if (retiring && retiring.key === preparedKey && isLive(retiring.stream)) {
+                retireWarm(); // the other way round: the retiring one is wanted again
+                warm = retiring; retiring = null; clearTimeout(retireTimer);
+                return;
+            }
+            retireWarm();
+            const token = warmToken;
+            try {
+                const stream = await PlaybackWebcam.open(webcam);
+                if (token !== warmToken || preparedKey !== camKey(webcam)) { PlaybackWebcam.stop(stream); return; }
+                warm = { key: preparedKey, stream };
+            } catch (err) { /* it will be opened (and any error reported) on TAKE */ }
+        });
 
         function stopWebcam() {
             camToken++;
             if (camSource) { camSource.disconnect(); camSource = null; }
-            PlaybackWebcam.stop(camStream);
+            const key = camKey(currentClip?.webcam);
+            // The staged cue wants this camera again: keep it running for the next TAKE
+            if (camStream && key === preparedKey && isLive(camStream) && !(warm && warm.key === key)) {
+                dropWarm();
+                warm = { key, stream: camStream };
+            } else {
+                PlaybackWebcam.stop(camStream);
+            }
             camStream = null;
             webcamEl.srcObject = null;
             webcamEl.style.display = 'none';
@@ -357,11 +413,23 @@
             webcamEl.style.display = 'block';
             webcamEl.style.transform = `rotate(${clip.rotation || 0}deg)`;
             let stream;
-            try {
-                stream = await PlaybackWebcam.open(clip.webcam);
-            } catch (err) {
-                if (token === camToken && currentClip === clip) failToBlack(clip.url, PlaybackWebcam.describeError(err));
-                return;
+            const key = camKey(clip.webcam);
+            if (warm && warm.key === key && isLive(warm.stream)) {
+                // Already running (opened ahead while this cue was staged)
+                stream = warm.stream;
+                warm = null;
+                warmToken++;
+            } else if (retiring && retiring.key === key && isLive(retiring.stream)) {
+                stream = retiring.stream;
+                retiring = null;
+                clearTimeout(retireTimer);
+            } else {
+                try {
+                    stream = await PlaybackWebcam.open(clip.webcam);
+                } catch (err) {
+                    if (token === camToken && currentClip === clip) failToBlack(clip.url, PlaybackWebcam.describeError(err));
+                    return;
+                }
             }
             if (token !== camToken || currentClip !== clip) { PlaybackWebcam.stop(stream); return; }
             camStream = stream;
