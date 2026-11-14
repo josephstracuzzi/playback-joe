@@ -1,5 +1,5 @@
 // ============================================================================
-// Playback Joe - WEB VIDEO cues (shared by main.js, the operator console and the output)
+// Playback Joe - WEBVIDEO cues (shared by main.js, the operator console and the output)
 // A web video cue (type 'webvideo') plays a YouTube or Vimeo link, or a direct link to a video file, on the
 // output with no site buttons on it, driven from the console like a video cue. It plays while on air and
 // pauses off air; RESTART starts it from the top on every TAKE, RESUME carries on where it stopped.
@@ -56,7 +56,7 @@
     }
 
     function kindLabel(w) {
-        return { youtube: 'YOUTUBE', vimeo: 'VIMEO', file: 'VIDEO LINK' }[w && w.kind] || 'WEB VIDEO';
+        return { youtube: 'YOUTUBE', vimeo: 'VIMEO', file: 'VIDEO LINK' }[w && w.kind] || 'WEBVIDEO';
     }
 
     // Put into the player page by the output: one small controller (window.__pjv) for the three kinds of

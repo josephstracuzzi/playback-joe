@@ -285,7 +285,7 @@ app.on('web-contents-created', (event, contents) => {
 
 // The pages the output keeps loaded (one per web cue address), from the operator's cuelist. Sent again to
 // each new output window as it loads.
-// Each is { url, video }: video = a WEB VIDEO cue's player page (parked paused, played on air).
+// Each is { url, video }: video = a WEBVIDEO cue's player page (parked paused, played on air).
 let webPages = [];
 ipcMain.on('set-web-pages', (event, pages) => {
     if (!fromOperator(event) || !Array.isArray(pages)) return;
@@ -836,7 +836,7 @@ function cleanWeb(w) {
     return w && typeof w === 'object' && isWebPageUrl(w.url) ? { url: w.url } : null;
 }
 
-// A WEB VIDEO cue (webvideo.js): its link is parsed again here, and its url is always the player page built
+// A WEBVIDEO cue (webvideo.js): its link is parsed again here, and its url is always the player page built
 // from it, so a cuelist file can't point the output anywhere else. Title and length are what the output
 // last reported, kept so the cue reads right before the page has loaded.
 function cleanWebVideo(w) {

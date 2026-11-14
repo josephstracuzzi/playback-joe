@@ -531,7 +531,7 @@
             webPages.forEach(page => { if (!wantedWebPages.has(page.url) && page.el !== webEl) removeWebPage(page); });
         });
 
-        // ---- WEB VIDEO cues (webvideo.js) ----
+        // ---- WEBVIDEO cues (webvideo.js) ----
         // A web video's player page is one of the pages above (video: true): parked paused off air, played on air,
         // driven through the small controller webvideo.js puts in it (window.__pjv). Polled 10x a second on air
         // for the console's timecode, the fade-out and the end (HOLD / ADV / LOOP).
@@ -609,7 +609,7 @@
 
         // Returns ms until the next look (null = stop)
         function handleWebVideoStatus(clip, el, s) {
-            if (s.error) { failToBlack(clip.url, `WEB VIDEO CAN'T BE PLAYED: ${s.error.toUpperCase()}`); return null; }
+            if (s.error) { failToBlack(clip.url, `WEBVIDEO CAN'T BE PLAYED: ${s.error.toUpperCase()}`); return null; }
             if (s.d > 0) currentDuration = s.d;
             if (performance.now() - wvLastReport >= 240) {
                 wvLastReport = performance.now();
@@ -649,7 +649,7 @@
                 if (done || currentClip !== clip || webEl !== el) return;
                 const s = await wvRun(el, '__pjv.status()');
                 if (currentClip !== clip || webEl !== el) return;
-                if (s && s.error) { failToBlack(clip.url, `WEB VIDEO CAN'T BE PLAYED: ${s.error.toUpperCase()}`); return; }
+                if (s && s.error) { failToBlack(clip.url, `WEBVIDEO CAN'T BE PLAYED: ${s.error.toUpperCase()}`); return; }
                 // PAUSE pressed straight after TAKE (PAUSE with nothing live): show it parked
                 if (operatorPaused) paused = true;
                 const showing = s && (paused ? s.ready : s.playing);

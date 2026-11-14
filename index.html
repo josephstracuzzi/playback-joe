@@ -107,7 +107,7 @@
         }
 
         /* CLOCK cue settings popup */
-        /* Settings popups (CLOCK, WEBPAGE / WEB VIDEO): one left edge, like the can't-play popup */
+        /* Settings popups (CLOCK, WEBPAGE / WEBVIDEO): one left edge, like the can't-play popup */
         .clock-modal { border-color: var(--blue); color: #fff; cursor: default; width: 520px; text-align: left; padding: 28px; }
         .clock-modal-title { font-size: 14px; margin-bottom: 20px; color: var(--blue); font-weight: bold; letter-spacing: 1px; text-align: left; }
         .clock-form { display: flex; flex-direction: column; gap: 8px; margin-bottom: 24px; }
@@ -652,7 +652,7 @@
                     <button class="btn-clear" onclick="clearCuelist()">CLEAR</button>
                     <button class="btn-action-text" onclick="loadCuelist()">IMPORT</button>
                     <button class="btn-action-text" onclick="saveCuelist()">EXPORT</button>
-                    <button class="btn-add" onclick="addLocalMedia()">+ ADD MEDIA</button>
+                    <button class="btn-add pick-anchor" onclick="openAddMediaMenu(this); this.blur();">+ ADD MEDIA</button>
                 </div>
                 <div class="format-hint" title="ACCEPTED: MP4, M4V, MOV, WEBM, MP3, WAV, AAC, M4A, FLAC, OGG, JPG, PNG, GIF, WEBP, BMP, PDF. VIDEO: H.264, VP8, VP9 OR AV1 (HEVC ON SOME COMPUTERS). NOT PRORES, DNXHR OR MPEG-2.">ACCEPTED: MP4, M4V, MOV, WEBM, MP3, WAV, AAC, M4A, FLAC, OGG, JPG, PNG, GIF, WEBP, BMP, PDF</div>
             </div>
@@ -1500,7 +1500,7 @@
             saveStateToLocalStorage();
         }
 
-        // WEB VIDEO cues (webvideo.js): type 'webvideo', played on the output's player page and driven from the
+        // WEBVIDEO cues (webvideo.js): type 'webvideo', played on the output's player page and driven from the
         // transport like a video cue. The console shows YouTube's still (others their address) and takes the
         // timecode from the output; with the output off nothing plays (it picks up where it was on OUTPUT on).
         function isWebVideo(clip) { return clip?.type === 'webvideo'; }
@@ -1534,7 +1534,7 @@
             playlist.forEach(clip => {
                 if (!isWebVideo(clip) || clip.url !== info.url) return;
                 if (info.error) {
-                    const msg = `WEB VIDEO CAN'T BE PLAYED: ${info.error.toUpperCase()}`;
+                    const msg = `WEBVIDEO CAN'T BE PLAYED: ${info.error.toUpperCase()}`;
                     if (clip.mediaError !== msg) { clip.mediaError = msg; changed = true; }
                     return;
                 }
@@ -1628,7 +1628,7 @@
         // The address popup: for a new WEBPAGE cue (webModalClip null) or an existing one
         let webModalClip = null;
         let webModalOpen = false;
-        let webModalVideo = false; // the same popup adds WEB VIDEO cues (a link instead of a page)
+        let webModalVideo = false; // the same popup adds WEBVIDEO cues (a link instead of a page)
 
         function openWebModal(idx, video) {
             const clip = idx === undefined || idx === null ? null : playlist[idx];
@@ -1637,7 +1637,7 @@
             webModalClip = clip;
             webModalOpen = true;
             webModalVideo = clip ? isWebVideo(clip) : !!video;
-            document.getElementById('web-modal-title').textContent = webModalVideo ? 'WEB VIDEO' : 'WEBPAGE';
+            document.getElementById('web-modal-title').textContent = webModalVideo ? 'WEBVIDEO' : 'WEBPAGE';
             document.getElementById('web-modal-label').textContent = webModalVideo ? 'LINK' : 'ADDRESS';
             document.getElementById('web-modal-file-row').style.display = webModalVideo ? 'none' : '';
             document.getElementById('web-modal-page-hint').style.display = webModalVideo ? 'none' : '';
@@ -1666,7 +1666,7 @@
         function confirmWebVideoModal() {
             const parsed = PlaybackWebVideo.parseLink(document.getElementById('web-url').value);
             if (!parsed) {
-                appendConsoleLog('WEB VIDEO: PASTE A YOUTUBE OR VIMEO LINK, OR A LINK TO A VIDEO FILE (MP4, M4V, MOV, WEBM).');
+                appendConsoleLog('WEBVIDEO: PASTE A YOUTUBE OR VIMEO LINK, OR A LINK TO A VIDEO FILE (MP4, M4V, MOV, WEBM).');
                 document.getElementById('web-url').focus();
                 return;
             }
@@ -2044,7 +2044,16 @@
 
         function openPatternMenu(anchor) {
             if (isCuelistLocked()) return;
-            openPickMenu(anchor, [['grid', 'GRID'], ['sync', 'SYNC TEST'], ['generator', 'GENERATOR'], ['clock', 'CLOCK'], ['webcam', 'WEBCAM'], ['webpage', 'WEBPAGE'], ['webvideo', 'WEB VIDEO']], null, addTestPattern);
+            openPickMenu(anchor, [['grid', 'GRID'], ['sync', 'SYNC TEST'], ['generator', 'GENERATOR'], ['clock', 'CLOCK']], null, addTestPattern);
+        }
+
+        // + ADD MEDIA: a file from this computer, or a live source
+        function openAddMediaMenu(anchor) {
+            if (isCuelistLocked()) return;
+            openPickMenu(anchor, [['file', 'LOCAL FILE'], ['webcam', 'WEBCAM'], ['webpage', 'WEBPAGE'], ['webvideo', 'WEBVIDEO']], null, choice => {
+                if (choice === 'file') addLocalMedia();
+                else addTestPattern(choice);
+            });
         }
 
         function openClockModeMenu(idx, anchor) {
@@ -3750,7 +3759,7 @@
             // Web pages and web videos play on the output only: with it off there's nothing to show them on
             if (takeClip && (isWeb(takeClip) || isWebVideo(takeClip)) && !isOutputWindowOpen) {
                 appendConsoleLog(`TAKE BLOCKED: CUE ${String(takeIdx + 1).padStart(2, '0')} "${takeClip.name}" - WEB CONTENT ONLY PLAYS ON THE OUTPUT. TURN OUTPUT ON FIRST.`);
-                showPlayError("CUE CAN'T PLAY: OUTPUT IS OFF", takeIdx, `${isWebVideo(takeClip) ? 'WEB VIDEOS' : 'WEBPAGES'} ONLY PLAY ON THE OUTPUT. TURN OUTPUT ON FIRST.`);
+                showPlayError("CUE CAN'T PLAY: OUTPUT IS OFF", takeIdx, `${isWebVideo(takeClip) ? 'WEBVIDEOS' : 'WEBPAGES'} ONLY PLAY ON THE OUTPUT. TURN OUTPUT ON FIRST.`);
                 return;
             }
             if (takeClip && takeClip.pdf && !takeClip.url) {
