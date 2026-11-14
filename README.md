@@ -1,9 +1,9 @@
 # Playback Joe
 Designed by Joseph Stracuzzi
 
-**Cue-based video, audio and image playback for live shows.** Line up your media in a cuelist, preview the next cue, and TAKE it to a clean fullscreen output on your projector or second screen, while you keep full control from the operator console.
+**Cue-based video, audio and image playback for live shows.** Line up your media in a cuelist, preview the next cue, and TAKE it to a clean fullscreen output on your projector or second screen, while you keep full control from the operator console. Alongside files, cues can be live sources: a clock or countdown, a webcam, a web page, or a YouTube or Vimeo video.
 
-![Playback Joe: operator console (left) and fullscreen output on a second display (right)](docs/screenshot-dual-display.png)
+![Playback Joe: operator console with the Playback Joe grid on air and a clock as the next cue (left), and the fullscreen output on a second display (right)](docs/screenshot-dual-display.png)
 
 ---
 
@@ -37,11 +37,12 @@ Your settings, your autosaved cuelist and the starter clips are kept in your app
 - At launch the console and the output appear together, once both are ready, so nothing half-drawn flashes on the projector.
 
 ### Cuelist
-- Add video, audio, images and PDFs: **MP4, M4V, MOV, WEBM, MP3, WAV, AAC, M4A, FLAC, OGG, JPG, PNG, GIF, WEBP, BMP, PDF**. See [Supported formats](#-supported-formats) for which codecs play.
+- **+ ADD MEDIA → LOCAL** adds video, audio, images and PDFs: **MP4, M4V, MOV, WEBM, MP3, WAV, AAC, M4A, FLAC, OGG, JPG, PNG, GIF, WEBP, BMP, PDF**. See [Supported formats](#-supported-formats) for which codecs play.
+- **+ ADD MEDIA** also adds live sources: **WEBCAM**, **WEBPAGE** and **WEBVIDEO**. **PATTERN** adds test patterns and a **CLOCK**. See [Live sources](#live-sources) below.
 - Each cue shows its type, resolution, codec and running time.
 - Per-cue **end behaviour**: **HOLD** on the last frame, **LOOP**, or **ADV**ance to the next cue.
 - Per-cue **fade in and fade out** for both picture and sound.
-- Per-cue **volume from 0 to 300%**, with a centre detent at 100%.
+- Per-cue **volume from 0 to 300%**, with a centre detent at 100% (webpages and webvideos go up to 100%).
 - Reorder cues with ▲▼, **IMPORT** and **EXPORT** cuelists, and everything is **autosaved** so you pick up where you left off.
 - CLEAR, IMPORT, EXPORT and ADD MEDIA lock while a cue is live, so a stray click can't wreck the show.
 
@@ -55,7 +56,7 @@ Your settings, your autosaved cuelist and the starter clips are kept in your app
 <img src="docs/feature-in-out.png" width="467" alt="Timecode panel with IN at 00:00:08, OUT at 00:00:45, and a blue strip under the scrub bar marking the range">
 
 ### Built for live use
-- If a media file is missing or won't play, the output cuts to black, the cue turns red and the problem is logged, instead of the show freezing.
+- If a media file is missing or won't play, the output cuts to black, the cue turns red and a popup says why, instead of the show freezing. See [When a cue can't play](#when-a-cue-cant-play).
 - A video whose picture can't be played on this computer (ProRes, for example) turns red when you add it, and TAKE won't put it on air, so it can't go out as sound over a black screen.
 - If the output window crashes or hangs, it is replaced automatically.
 - Switch **OUTPUT** off in the middle of a cue and the operator's PGM monitor takes over the picture and sound where the output left off. Switch it back on and the output picks the cue up again. OUTPUT on/off is remembered for the next launch.
@@ -71,32 +72,49 @@ Your settings, your autosaved cuelist and the starter clips are kept in your app
 | **↑ / ↓** | Select the previous / next cue |
 | **Enter**, **Numpad Enter** or **Space** | TAKE |
 | **Esc** or **Backspace** | KILL |
+| **← / →** | Step the paused live cue back / forward one frame |
+| **I** / **O** | Set the live cue's IN / OUT point at the frame on screen |
 | **-** / **+** | Previous / next page on a live PDF cue (main keyboard or numpad) |
 
 ### PDF slides
-Add a **PDF** with ADD MEDIA and it becomes one cue. Pick a page from its dropdown, or step with **◀ PREV** and **NEXT ▶**, or press **-** and **+** (main keyboard or numpad) while it's live. Pages cut instantly on the output. For a PowerPoint deck, export it as a PDF first. Animations, transitions and embedded video don't carry over.
+Add a **PDF** with **+ ADD MEDIA → LOCAL** and it becomes one cue. Pick a page from its dropdown, or step with **◀ PREV** and **NEXT ▶**, or press **-** and **+** (main keyboard or numpad) while it's live. Pages cut instantly on the output. For a PowerPoint deck, export it as a PDF first. Animations, transitions and embedded video don't carry over.
 
 <img src="docs/feature-pdf-cue.png" width="738" alt="A PDF cue on page 3 of 6, with its page list open and PREV and NEXT buttons beside it">
 
 ### Test patterns
-The **PATTERN** list next to CLEAR adds a test cue to the cuelist: the bundled **Grid** or **Sync Test**, or a **Generator** cue. A generator cue is a normal cue with its own pattern and size pickers: grid, colour bars, greyscale, checkerboard or a solid colour, from 720p to 4K.
+The **PATTERN** list next to CLEAR adds a test cue to the cuelist: the bundled **Grid** or **Sync Test**, a **Generator** cue, or a **Clock** (below). A generator cue is a normal cue with its own pattern and size pickers: grid, colour bars, greyscale, checkerboard or a solid colour, from 720p to 4K.
+
+<img src="docs/feature-test-patterns.png" width="738" alt="A generator cue with its pattern list open, showing grid, colour bars, greyscale, checkerboard and solid colours">
+
+### Live sources
+Clocks, webcams, webpages and webvideos sit in the cuelist like any other cue, and TAKE, KILL, fades and the transport work on them. Each has a **SET** button (or its link) on the cue for its settings.
+
+<img src="docs/feature-live-sources.png" width="738" alt="Four cues in the cuelist: a time-of-day clock with HOLD and SET, a webcam with HOLD and SET, a webpage showing its address, and a YouTube webvideo with HOLD, ADV, LOOP and its RESUME badge">
 
 ### Clock
 **PATTERN → CLOCK** adds a live clock cue. **SET** on the cue opens its settings: the mode, each in its own colour (**TIME OF DAY** in 12H or 24H, with or without seconds and the date; **COUNTDOWN**, a set length from TAKE typed as HH:MM:SS; **COUNTDOWN TO**, a target time of day such as doors at 19:30; or **COUNT UP**), and an optional label above the clock. What a countdown does at zero is set with the cue's HOLD / ADV / LOOP badges, like any cue (a clock with no end only holds). Countdowns turn amber in the last minute and red in the last 10 seconds, and PLAY, PAUSE, GO TO 20 / 10, fades and OUTPUT on / off all work with them.
 
+<img src="docs/feature-clock-settings.png" width="453" alt="CLOCK SETTINGS with COUNTDOWN chosen in amber, an optional label, a 00:05:00 length and seconds shown">
+
 ### Webcam
 **ADD MEDIA → WEBCAM** opens **WEBCAM SETTINGS**: pick the camera, a separate **SOUND** input if you want sound (NONE by default) and the rotation, then DONE adds the cue. **SET** on the cue opens the same settings later. The SOUND input can be a mixer feed, for example, instead of the camera's own microphone. Sound goes through the cue's volume fader and the meter. If the camera or sound input isn't connected, the cue turns red and won't TAKE. On a Mac, allow the camera and microphone the first time macOS asks.
 
-### When a cue can't play
-If TAKE is refused (a missing or unplayable file, a web cue with OUTPUT off, a PDF still loading), or a cue fails while on air, a popup names the cue and says why. Enter, Space and Esc keep working with it open, the next TAKE that goes ahead closes it, and the CONSOLE keeps the full list.
+<img src="docs/feature-webcam-settings.png" width="453" alt="WEBCAM SETTINGS with an NDI webcam chosen as the camera, its NDI audio as the sound input, and rotation at 0 degrees">
 
 ### Webvideo
-**ADD MEDIA → WEBVIDEO** adds a YouTube or Vimeo link, or a direct link to a video file (MP4, M4V, MOV, WEBM). It plays on the output as a clean picture, with no site buttons, titles or suggestions, and the console drives it like a video cue: PLAY, PAUSE, scrubbing, frame steps, IN / OUT points, GO TO 20 / 10, timecode, HOLD / ADV / LOOP, fades and volume (up to 100%). Webvideos and webpages play on the output only: with OUTPUT off, TAKE refuses them and says so in the console. It loads on the output as soon as it's added, reads its title and length, plays when taken and pauses when it goes off air. The ⏮ / ⏯ badge on the cue picks **RESTART** (every TAKE starts from the top) or **RESUME** (carries on where it stopped). The CUE and PGM monitors show YouTube's still image, or the link for the others. The site's own ads, if any, still play. A video that can't be played (removed, private, or not allowed to be embedded) turns the cue red.
+**ADD MEDIA → WEBVIDEO** adds a YouTube or Vimeo link, or a direct link to a video file (MP4, M4V, MOV, WEBM). It plays on the output as a clean picture, with no site buttons, titles or suggestions, and the console drives it like a video cue: PLAY, PAUSE, scrubbing, frame steps, IN / OUT points, GO TO 20 / 10, timecode, HOLD / ADV / LOOP, fades and volume (up to 100%). It loads on the output as soon as it's added, reads its title and length, plays when taken and pauses when it goes off air. The ⏮ / ⏯ badge on the cue picks **RESTART** (every TAKE starts from the top) or **RESUME** (carries on where it stopped). The CUE and PGM monitors show YouTube's still image, or the link for the others. The site's own ads, if any, still play. A video that can't be played (removed, private, or not allowed to be embedded) turns the cue red.
+
+<img src="docs/feature-webvideo-live.png" width="738" alt="The console with a YouTube webvideo on air: ON AIR on the PGM monitor, its picture, and the timecode at 00:01:38 elapsed and 00:08:56 remaining">
+
+Webvideos and webpages play on the output only: with OUTPUT off, TAKE refuses them and says why.
 
 ### Webpage
 **ADD MEDIA → WEBPAGE** adds a web page cue, for example Slido, Canva or Google Slides, or a live data page: type an address (http or https) or pick a local **.html** file. The page starts running on the output as soon as the cue is added, hidden and muted while it's off air, so live data keeps updating. On TAKE it appears with the cue's fade in and volume (up to 100%; a new webpage cue starts with its fader down); KILL or the next TAKE hides and mutes it again, without closing it. It can be clicked, scrolled and typed into **on the output screen only**; the CUE and PGM monitors show its address. A page's own fullscreen or Present button fills the output screen, and it stays fullscreen while off air (Esc on the page leaves it). Links that would open a new window open in place. A page that can't load turns the cue red when taken, and is tried again on the next TAKE. OUTPUT off and on reloads the pages. While the output window has the keyboard, a banner on the console warns that Enter, Space and Esc go to the page until you click back on the console. Pages can't use the camera, microphone or other permissions, and can't reach the app.
 
-<img src="docs/feature-test-patterns.png" width="738" alt="A generator cue with its pattern list open, showing grid, colour bars, greyscale, checkerboard and solid colours">
+### When a cue can't play
+If TAKE is refused (a missing or unplayable file, a webpage or webvideo with OUTPUT off, a PDF still loading), or a cue fails while on air, a popup names the cue and says why. Enter, Space and Esc keep working with it open, the next TAKE that goes ahead closes it, and the CONSOLE keeps the full list.
+
+<img src="docs/feature-cant-play.png" width="363" alt="A red popup: CUE CAN'T PLAY: OUTPUT IS OFF, cue 06 webpage, webpages only play on the output, turn output on first, with an OK button">
 
 ### Starter cues
 A fresh install opens with four test cues made for Playback Joe:
