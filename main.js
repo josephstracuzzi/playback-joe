@@ -614,22 +614,36 @@ function cleanClock(k) {
     };
 }
 
+// A WEBCAM cue is an image cue showing a live camera (webcam.js). Device ids and names only, no files.
+function cleanWebcam(w) {
+    if (!w || typeof w !== 'object') return null;
+    const text = (v, max) => typeof v === 'string' ? v.slice(0, max) : '';
+    return { videoId: text(w.videoId, 300), videoLabel: text(w.videoLabel, 200), audioId: text(w.audioId, 300), audioLabel: text(w.audioLabel, 200) };
+}
+
+// Same as webcamUrl() in webcam.js: never loaded, it names the cue for the media-error checks
+function webcamUrl(w) {
+    return 'webcam:' + encodeURIComponent(w.videoId || 'default');
+}
+
 function cleanCue(c) {
     if (!c || typeof c !== 'object') return null;
     const originalName = c.originalName || c.name;
     const pattern = c.type === 'image' ? cleanPattern(c.pattern) : null;
     const pdf = c.type === 'image' ? cleanPdf(c.pdf) : null;
+    const webcam = c.type === 'image' && !pattern && !pdf ? cleanWebcam(c.webcam) : null;
     const clock = c.type === 'clock' ? cleanClock(c.clock) : null;
     if (c.type === 'clock' && !clock) return null;
     const drawn = !!pattern || !!pdf;
     if (typeof originalName !== 'string' || !CUE_TYPES.includes(c.type)) return null;
-    if (!drawn && !clock && !isLocalFileUrl(c.url)) return null;
+    if (!drawn && !clock && !webcam && !isLocalFileUrl(c.url)) return null;
     return {
         originalName: originalName.slice(0, 512),
-        url: clock ? '' : drawn ? (isPatternPicture(c.url) ? c.url : '') : c.url,
+        url: clock ? '' : webcam ? webcamUrl(webcam) : drawn ? (isPatternPicture(c.url) ? c.url : '') : c.url,
         ...(pattern ? { pattern } : {}),
         ...(pdf ? { pdf } : {}),
         ...(clock ? { clock } : {}),
+        ...(webcam ? { webcam } : {}),
         type: c.type,
         gain: numberInRange(c.gain, 0, 3, 1.0),
         fadeIn: numberInRange(c.fadeIn, 0, 5, 0.0),

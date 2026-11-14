@@ -50,9 +50,11 @@
     <video id="output-video"></video>
     <img id="output-image" />
     <canvas id="output-clock" width="1920" height="1080"></canvas>
+    <video id="output-webcam" muted playsinline></video>
     <audio id="output-audio"></audio>
 
     <script src="clock.js"></script>
+    <script src="webcam.js"></script>
     <script>
         // Supports both contextBridge (window.playbackAPI) and legacy fallback
         const api = window.playbackAPI || (typeof require !== 'undefined' ? {
@@ -74,6 +76,7 @@
         const aud = document.getElementById('output-audio');
         const fadeOverlay = document.getElementById('output-fade-overlay');
         const clockCanvas = document.getElementById('output-clock');
+        const webcamEl = document.getElementById('output-webcam');
 
         let currentClip = null;
         let currentFadeOut = 0;
@@ -114,6 +117,7 @@
         let audioCtx = null;
         let vidGainNode = null;
         let audGainNode = null;
+        let camGainNode = null;   // a WEBCAM cue's SOUND input
         let analyser = null;
         let animFrameId = null;
         let dataArray = null;
@@ -137,10 +141,13 @@
                     const audSrc = audioCtx.createMediaElementSource(aud);
                     audSrc.connect(audGainNode).connect(analyser);
 
+                    camGainNode = audioCtx.createGain();
+                    camGainNode.connect(analyser);
+
                     analyser.connect(audioCtx.destination);
 
                     function broadcastAudioLevel() {
-                        if (analyser && dataArray && currentClip && (!vid.paused || !aud.paused)) {
+                        if (analyser && dataArray && currentClip && (!vid.paused || !aud.paused || camSource)) {
                             analyser.getByteFrequencyData(dataArray);
                             let sum = 0;
                             for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
@@ -186,6 +193,7 @@
         let currentFadeIn = 0;
 
         function activeGainNode() {
+            if (currentClip?.webcam) return camGainNode;
             return currentClip?.type === 'audio' ? audGainNode : vidGainNode;
         }
 
@@ -325,10 +333,54 @@
             api?.sendTimeUpdate(clockRunner.elapsed, clockRunner.duration);
         }
 
+        // ---- WEBCAM cues (webcam.js) ----
+        // An image cue with `webcam` settings: the camera's live picture on its own video element (muted), and
+        // the chosen SOUND input through camGainNode, so the cue's volume, fades, KILL and the meter all apply.
+        // The camera takes a moment to open; a newer TAKE or KILL in the meantime wins (camToken).
+        let camStream = null;
+        let camSource = null;
+        let camToken = 0;
+
+        function stopWebcam() {
+            camToken++;
+            if (camSource) { camSource.disconnect(); camSource = null; }
+            PlaybackWebcam.stop(camStream);
+            camStream = null;
+            webcamEl.srcObject = null;
+            webcamEl.style.display = 'none';
+        }
+
+        // Opens the cue's camera (and SOUND input); onShowing runs once its first frame is up
+        async function startWebcam(clip, onShowing) {
+            stopWebcam();
+            const token = camToken;
+            webcamEl.style.display = 'block';
+            webcamEl.style.transform = `rotate(${clip.rotation || 0}deg)`;
+            let stream;
+            try {
+                stream = await PlaybackWebcam.open(clip.webcam);
+            } catch (err) {
+                if (token === camToken && currentClip === clip) failToBlack(clip.url, PlaybackWebcam.describeError(err));
+                return;
+            }
+            if (token !== camToken || currentClip !== clip) { PlaybackWebcam.stop(stream); return; }
+            camStream = stream;
+            webcamEl.srcObject = stream;
+            if (stream.getAudioTracks().length) {
+                initAudio();
+                camSource = audioCtx.createMediaStreamSource(stream);
+                camSource.connect(camGainNode);
+            }
+            webcamEl.play().catch(() => {});
+            const shown = () => { if (token === camToken && onShowing) onShowing(); };
+            if (webcamEl.readyState >= 2) shown(); else webcamEl.addEventListener('loadeddata', shown, { once: true });
+        }
+
         api?.onPlayVideo((clip) => {
             // A TAKE during a KILL fade cancels the pending KILL cleanup, so it can't blank the new clip
             if (killCleanupTimer) { clearTimeout(killCleanupTimer); killCleanupTimer = null; }
             stopClock();
+            stopWebcam();
             currentClip = clip;
             operatorPaused = false;
             fadeOutStarted = false;
@@ -361,6 +413,20 @@
                         fadeOverlay.style.opacity = '0';
                     }, 50);
                 }
+            } else if (clip.webcam) {
+                currentDuration = 0;
+                api.sendTimeUpdate(0, 0);
+                // Black until the camera's first frame, then its fade-in (picture and sound together)
+                initAudio();
+                camGainNode.gain.cancelScheduledValues(audioCtx.currentTime);
+                camGainNode.gain.setValueAtTime(fadeIn > 0 ? 0 : clipGainValue(), audioCtx.currentTime);
+                fadeOverlay.style.opacity = '1';
+                startWebcam(clip, () => {
+                    if (currentClip !== clip) return;
+                    fadeOverlay.style.transition = fadeIn > 0 ? `opacity ${fadeIn}s ease` : 'none';
+                    fadeOverlay.style.opacity = '0';
+                    if (fadeIn > 0) rampActiveGain(clipGainValue(), fadeIn);
+                });
             } else if (clip.type === 'image') {
                 img.style.display = 'block';
                 img.style.transform = `rotate(${rot}deg)`;
@@ -451,6 +517,18 @@
                 api.outputResumed(token);
             };
             stopClock();
+            stopWebcam();
+            if (clip.webcam) {
+                // The camera opens silent; once its picture is up the sound rises over the 40 ms crossfade
+                initAudio();
+                camGainNode.gain.cancelScheduledValues(audioCtx.currentTime);
+                camGainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+                startWebcam(clip, () => {
+                    fadeUpFromSilence(clipGainValue() * level, 0, 0);
+                    confirm();
+                });
+                return;
+            }
             if (clip.type === 'clock') {
                 // Picks the clock up where the PGM monitor's copy is (no preroll: nothing to load)
                 startClock(clip, { elapsed: position, paused: !!paused, duration: Number.isFinite(state.duration) ? state.duration : null });
@@ -538,6 +616,7 @@
             const clipName = currentClip.originalName || currentClip.name || failedUrl;
             currentClip = null;
             fadeOutStarted = false;
+            stopWebcam();
             vid.pause();
             vid.style.display = 'none';
             aud.pause();
@@ -737,10 +816,12 @@
             fadeOverlay.style.opacity = '1';
             rampGainToSilence(vidGainNode, 1);
             rampGainToSilence(audGainNode, 1);
+            rampGainToSilence(camGainNode, 1);
             if (killCleanupTimer) clearTimeout(killCleanupTimer);
             killCleanupTimer = setTimeout(() => {
                 killCleanupTimer = null;
                 stopClock();
+                stopWebcam();
                 vid.pause();
                 vid.src = '';
                 vid.style.display = 'none';

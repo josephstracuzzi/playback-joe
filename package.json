@@ -1,6 +1,6 @@
 {
   "name": "playback-joe",
-  "version": "10.32.0",
+  "version": "10.33.0",
   "description": "Professional cue-based media playback application for Windows, macOS and Linux with dual display support",
   "main": "main.js",
   "scripts": {
@@ -43,7 +43,11 @@
         }
       ],
       "icon": "icon.png",
-      "category": "public.app-category.video"
+      "category": "public.app-category.video",
+      "extendInfo": {
+        "NSCameraUsageDescription": "Playback Joe shows a camera on the output when you add a WEBCAM cue.",
+        "NSMicrophoneUsageDescription": "Playback Joe plays the sound input you choose for a WEBCAM cue."
+      }
     },
     "linux": {
       "target": [
@@ -67,6 +71,7 @@
       "logo.png",
       "grid-logo.png",
       "clock.js",
+      "webcam.js",
       "vendor/pdfjs/**",
       "logo.ico",
       "icon.png"

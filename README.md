@@ -84,6 +84,9 @@ The **PATTERN** list next to CLEAR adds a test cue to the cuelist: the bundled *
 ### Clock
 **PATTERN → CLOCK** adds a live clock cue. Pick its mode on the cue: **TIME OF DAY** (12H AM/PM or 24H, with or without seconds and the date), **COUNTDOWN** (a set length from TAKE), **COUNTDOWN TO** (a time of day, such as doors at 19:30) or **COUNT UP**. **SET** opens its settings, including an optional label above the clock and what a countdown does at zero: HOLD, ADV to the next cue, or LOOP. Countdowns turn amber in the last minute and red in the last 10 seconds, and PLAY, PAUSE, GO TO 20 / 10, fades and OUTPUT on / off all work with them.
 
+### Webcam
+**PATTERN → WEBCAM** adds a live camera cue. Pick the camera on the cue, and a separate **SOUND** input if you want sound (NONE by default), for example a mixer feed instead of the camera's own microphone. Sound goes through the cue's volume fader and the meter. If the camera or sound input isn't connected, the cue turns red and won't TAKE. On a Mac, allow the camera and microphone the first time macOS asks.
+
 <img src="docs/feature-test-patterns.png" width="738" alt="A generator cue with its pattern list open, showing grid, colour bars, greyscale, checkerboard and solid colours">
 
 ### Starter cues

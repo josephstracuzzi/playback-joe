@@ -630,6 +630,7 @@
                     <video id="preview-video" muted playsinline></video>
                     <canvas id="preview-still"></canvas>
                     <canvas id="preview-clock" width="1920" height="1080"></canvas>
+                    <video id="preview-webcam" muted playsinline></video>
                     <img id="preview-image" />
                     <audio id="preview-audio"></audio>
                     <span id="preview-placeholder" class="monitor-placeholder">NO CLIP</span>
@@ -651,6 +652,7 @@
                     <video id="program-video" muted playsinline></video>
                     <img id="program-image" />
                     <canvas id="program-clock" width="1920" height="1080"></canvas>
+                    <video id="program-webcam" muted playsinline></video>
                     <audio id="program-audio"></audio>
                     <div id="program-fade-overlay" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #000; opacity: 0; pointer-events: none; transition: none; z-index: 20;"></div>
                     <span id="program-placeholder" class="monitor-placeholder">NO OUTPUT</span>
@@ -714,6 +716,7 @@
     </div>
 
     <script src="clock.js"></script>
+    <script src="webcam.js"></script>
     <script>
         const rawIpc = (typeof require !== 'undefined') ? require('electron').ipcRenderer : null;
         const api = window.playbackAPI || {
@@ -938,7 +941,9 @@
                 const progVid = document.getElementById('program-video');
                 const progAud = document.getElementById('program-audio');
                 let level = 0;
-                if (clip && clip.type !== 'image' && !isKilling && (!progVid.paused || !progAud.paused)) {
+                // A webcam's SOUND input counts too (it's an image cue, with no element playing)
+                const camSound = isWebcam(clip) && !!pgmCamSource;
+                if (clip && (clip.type !== 'image' || camSound) && !isKilling && (camSound || !progVid.paused || !progAud.paused)) {
                     localAnalyser.getByteFrequencyData(localLevelData);
                     let sum = 0;
                     for (let i = 0; i < localLevelData.length; i++) sum += localLevelData[i];
@@ -993,6 +998,12 @@
             if (isClock(clip)) {
                 // The PGM clock is already running in step: line it up with the output's last report
                 if (!programPausedByOperator && !programClock.ended && Math.abs(programClock.elapsed - programReportedTime) > 0.3) programClock.seek(programReportedTime);
+            } else if (isWebcam(clip)) {
+                // The PGM camera is already live: its SOUND input rises while the output's falls
+                initLocalMeter();
+                setLocalClipGain(clip.gain);
+                setProgramCamSound(true);
+                fadeUpLocalAudio(1, 1, 0);
             } else if (clip.type !== 'image') {
                 const el = liveProgramEl(clip);
                 const pos = programReportedTime;  // the output's own position
@@ -1145,6 +1156,7 @@
             const mute = () => {
                 document.getElementById('program-video').muted = true;
                 document.getElementById('program-audio').volume = 0;
+                setProgramCamSound(false);
             };
             if (crossfade) {
                 rampLocalAudio(0, AUDIO_SWITCH_S);
@@ -1265,6 +1277,7 @@
         const imageSvg = `<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>`;
         const audioSvg = `<svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>`;
         const clockSvg = `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><polyline points="12 7 12 12 15.5 14"></polyline></svg>`;
+        const webcamSvg = `<svg viewBox="0 0 24 24"><circle cx="12" cy="10" r="7"></circle><circle cx="12" cy="10" r="2.5"></circle><path d="M8 20h8M12 17v3"></path></svg>`;
 
         // CLOCK cues on the CUE and PGM monitors. The PGM copy keeps the same time as the output's (same
         // settings, same transport commands); with the output closed it's the program: it drives the timecode
@@ -1296,6 +1309,106 @@
         function stopProgramClock() {
             programClock.stop();
             document.getElementById('program-clock').style.display = 'none';
+            stopCamView('program'); // the PGM monitor's other live picture (every place that clears PGM calls this)
+        }
+
+        // WEBCAM cues on the CUE and PGM monitors (webcam.js). Each monitor opens the camera itself, muted.
+        // The PGM copy's SOUND input reaches the speakers only while the output is closed (pgmCamGate), as
+        // the output plays it otherwise.
+        function isWebcam(clip) { return !!clip?.webcam; }
+        const camViews = {
+            preview: { el: document.getElementById('preview-webcam'), stream: null, token: 0 },
+            program: { el: document.getElementById('program-webcam'), stream: null, token: 0 }
+        };
+        let pgmCamSource = null;
+        let pgmCamGate = null;
+
+        function stopCamView(name) {
+            const v = camViews[name];
+            v.token++;
+            PlaybackWebcam.stop(v.stream);
+            v.stream = null;
+            v.el.srcObject = null;
+            v.el.style.display = 'none';
+            if (name === 'program') {
+                if (pgmCamSource) { pgmCamSource.disconnect(); pgmCamSource = null; }
+                if (pgmCamGate) { pgmCamGate.disconnect(); pgmCamGate = null; }
+            }
+        }
+
+        async function startCamView(name, clip, onError) {
+            stopCamView(name);
+            const v = camViews[name];
+            const token = v.token;
+            v.el.style.display = 'block';
+            v.el.style.opacity = '1';
+            v.el.style.transform = `rotate(${clip.rotation || 0}deg)`;
+            let stream;
+            try {
+                stream = await PlaybackWebcam.open(clip.webcam);
+            } catch (err) {
+                if (token === v.token && onError) onError(PlaybackWebcam.describeError(err));
+                return;
+            }
+            if (token !== v.token) { PlaybackWebcam.stop(stream); return; }
+            v.stream = stream;
+            v.el.srcObject = stream;
+            v.el.play().catch(() => {});
+            if (name === 'program' && stream.getAudioTracks().length && localAudioCtx && localClipGain) {
+                pgmCamSource = localAudioCtx.createMediaStreamSource(stream);
+                pgmCamGate = localAudioCtx.createGain();
+                pgmCamGate.gain.value = isOutputWindowOpen ? 0 : 1;
+                pgmCamSource.connect(pgmCamGate).connect(localClipGain);
+            }
+        }
+
+        // The PGM webcam's sound on (output closed) or off (the output has it)
+        function setProgramCamSound(on) {
+            if (pgmCamGate && localAudioCtx) pgmCamGate.gain.setValueAtTime(on ? 1 : 0, localAudioCtx.currentTime);
+        }
+
+        // Fills in everything about a webcam cue that follows from its settings
+        function applyWebcamToCue(clip) {
+            const w = clip.webcam;
+            clip.url = PlaybackWebcam.webcamUrl(w);
+            clip.name = `WEBCAM - ${w.videoLabel || 'DEFAULT CAMERA'}`;
+            clip.originalName = clip.name;
+            clip.format = 'WEBCAM';
+            clip.codec = w.audioId ? `SOUND: ${w.audioLabel || 'INPUT'}`.slice(0, 40) : 'NO SOUND';
+            clip.resolution = 'LIVE';
+            clip.durationStr = 'LIVE';
+            clip.endBehavior = 'hold';
+            clip.fadeOut = 0;
+            if (!w.audioId) clip.gain = 1.0;
+        }
+
+        async function openWebcamCameraMenu(idx, anchor) {
+            const clip = playlist[idx];
+            if (!isWebcam(clip) || idx === currentIndex) return;
+            const { cameras } = await PlaybackWebcam.listDevices();
+            openPickMenu(anchor, [['', 'DEFAULT CAMERA'], ...cameras.map(c => [c.id, c.label])], clip.webcam.videoId, id => {
+                const cam = cameras.find(c => c.id === id);
+                clip.webcam = { ...clip.webcam, videoId: id, videoLabel: cam ? cam.label : '' };
+                updateWebcamCue(clip);
+            });
+        }
+
+        async function openWebcamSoundMenu(idx, anchor) {
+            const clip = playlist[idx];
+            if (!isWebcam(clip) || idx === currentIndex) return;
+            const { mics } = await PlaybackWebcam.listDevices();
+            openPickMenu(anchor, [['', 'NONE'], ...mics.map(m => [m.id, m.label])], clip.webcam.audioId, id => {
+                const mic = mics.find(m => m.id === id);
+                clip.webcam = { ...clip.webcam, audioId: id, audioLabel: mic ? mic.label : '' };
+                updateWebcamCue(clip);
+            });
+        }
+
+        function updateWebcamCue(clip) {
+            applyWebcamToCue(clip);
+            loadClipMetadata(clip);
+            if (playlist[stagedIndex] === clip) selectClip(stagedIndex);
+            saveStateToLocalStorage();
         }
         // Rotation badge at 0°: a small rotate icon instead of "0°" (the angle shows once it is turned)
         const rotateSvg = `<svg class="badge-icon" viewBox="0 0 24 24" aria-label="ROTATE"><path d="M20 12a8 8 0 1 1-2.34-5.66"></path><polyline points="20 4 20 9 15 9"></polyline></svg>`;
@@ -1534,8 +1647,10 @@
             clip.rotation = 0;
             if (!PlaybackClock.hasEnd(clip.clock)) clip.endBehavior = 'hold';
             if (clip.clock.mode === 'until' && clip.endBehavior === 'loop') clip.endBehavior = 'hold';
-            clip.duration = PlaybackClock.clockDuration(clip.clock);
-            clip.durationStr = clip.duration > 0 ? formatTimecode(clip.duration) : 'LIVE';
+            // COUNTDOWN TO shows its target: the time left depends on when it's taken
+            clip.duration = clip.clock.mode === 'countdown' ? clip.clock.duration : 0;
+            clip.durationStr = clip.clock.mode === 'countdown' ? formatTimecode(clip.clock.duration)
+                : clip.clock.mode === 'until' ? `TO ${clip.clock.target}` : 'LIVE';
             delete clip.mediaError;
         }
 
@@ -1545,6 +1660,12 @@
             if (choice === 'clock') {
                 const clip = { ...base, type: 'clock', url: '', clock: PlaybackClock.defaultClock() };
                 applyClockToCue(clip);
+                finishAddingCue(clip);
+                return;
+            }
+            if (choice === 'webcam') {
+                const clip = { ...base, webcam: { videoId: '', videoLabel: '', audioId: '', audioLabel: '' } };
+                applyWebcamToCue(clip);
                 finishAddingCue(clip);
                 return;
             }
@@ -1608,7 +1729,7 @@
 
         function openPatternMenu(anchor) {
             if (isCuelistLocked()) return;
-            openPickMenu(anchor, [['grid', 'GRID'], ['sync', 'SYNC TEST'], ['generator', 'GENERATOR'], ['clock', 'CLOCK']], null, addTestPattern);
+            openPickMenu(anchor, [['grid', 'GRID'], ['sync', 'SYNC TEST'], ['generator', 'GENERATOR'], ['clock', 'CLOCK'], ['webcam', 'WEBCAM']], null, addTestPattern);
         }
 
         function openClockModeMenu(idx, anchor) {
@@ -1867,6 +1988,19 @@
                 renderPlaylist();
                 return;
             }
+            if (isWebcam(clip)) {
+                // Is its camera (and SOUND input) connected? Found by name if the ids changed on this computer.
+                applyWebcamToCue(clip);
+                PlaybackWebcam.checkDevices(clip.webcam).then(r => {
+                    clip.webcam = r.webcam;
+                    applyWebcamToCue(clip);
+                    if (r.ok) delete clip.mediaError; else clip.mediaError = r.message;
+                }).catch(() => { delete clip.mediaError; }).finally(() => {
+                    if (callback) callback();
+                    renderPlaylist();
+                });
+                return;
+            }
             if (clip.pdf) {
                 preparePdfCue(clip, callback);
                 return;
@@ -1961,6 +2095,7 @@
                     pattern: c.pattern,
                     pdf: c.pdf,
                     clock: c.clock,
+                    webcam: c.webcam,
                     type: c.type,
                     gain: c.gain !== undefined ? c.gain : 1.0,
                     fadeIn: c.fadeIn !== undefined ? c.fadeIn : 0.0,
@@ -2140,6 +2275,7 @@
                 if (clip.type === 'image') iconHtml = imageSvg;
                 if (clip.type === 'audio') iconHtml = audioSvg;
                 if (isClock(clip)) iconHtml = clockSvg;
+                if (isWebcam(clip)) iconHtml = webcamSvg;
 
                 const isBoosted = clip.gain > 1.0;
                 const cueNumStr = (idx + 1).toString().padStart(2, '0');
@@ -2177,7 +2313,7 @@
                     badgesHtml = `
                         <div class="clip-badges">
                             <button class="badge active-hold badge-fixed" title="PHOTOS ALWAYS HOLD">HOLD</button>
-                            ${clip.pattern ? `<button class="cue-select pick-anchor" ${isLive ? 'disabled' : ''} onclick="openPatternKindMenu(${idx}, this); this.blur();" title="TEST PATTERN">${(PATTERN_KINDS.find(k => k[0] === clip.pattern.kind) || [])[1] || ''}</button>` : clip.pdf ? `<button class="cue-select pick-anchor" onclick="openPdfPageMenu(${idx}, this); this.blur();" title="GO TO PAGE">${clip.pdf.page} / ${clip.pdf.pages}</button>` : `<span class="badge slot-spacer" aria-hidden="true"></span>
+                            ${clip.pattern ? `<button class="cue-select pick-anchor" ${isLive ? 'disabled' : ''} onclick="openPatternKindMenu(${idx}, this); this.blur();" title="TEST PATTERN">${(PATTERN_KINDS.find(k => k[0] === clip.pattern.kind) || [])[1] || ''}</button>` : isWebcam(clip) ? `<button class="cue-select pick-anchor" ${isLive ? 'disabled' : ''} onclick="openWebcamCameraMenu(${idx}, this); this.blur();" title="CAMERA: ${escapeHtml(clip.webcam.videoLabel || 'DEFAULT CAMERA')}">${escapeHtml(clip.webcam.videoLabel || 'DEFAULT CAMERA')}</button>` : clip.pdf ? `<button class="cue-select pick-anchor" onclick="openPdfPageMenu(${idx}, this); this.blur();" title="GO TO PAGE">${clip.pdf.page} / ${clip.pdf.pages}</button>` : `<span class="badge slot-spacer" aria-hidden="true"></span>
                             <span class="badge slot-spacer" aria-hidden="true"></span>`}
                             <button class="badge ${rotVal > 0 ? 'active-rot' : ''}" ${isLive ? 'disabled' : ''} onclick="cycleClipRotation(${idx})" title="ROTATION: ${rotVal}° (CLICK TO TURN 90°)">${rotVal > 0 ? `${rotVal}°` : rotateSvg}</button>
                         </div>
@@ -2221,6 +2357,14 @@
                             <span id="fadeout-val-${idx}">${clip.fadeOut.toFixed(1)}S</span>
                         </div>
                     `;
+                } else if (isWebcam(clip)) {
+                    // A webcam has no end, so its SOUND input picker takes the place of FADE OUT
+                    fadeControlsHtml += `
+                        <div class="fade-group fade-slot">
+                            <span>SOUND:</span>
+                            <button class="cue-select pick-anchor" ${isLive ? 'disabled' : ''} onclick="openWebcamSoundMenu(${idx}, this); this.blur();" title="SOUND INPUT: ${escapeHtml(clip.webcam.audioLabel || 'NONE')}">${escapeHtml(clip.webcam.audioId ? (clip.webcam.audioLabel || 'INPUT') : 'NONE')}</button>
+                        </div>
+                    `;
                 } else {
                     fadeControlsHtml += `
                         <div class="fade-group slot-spacer" aria-hidden="true">
@@ -2259,7 +2403,7 @@
                                 <span class="clip-name" title="${escapeHtml(clip.name)}">${escapeHtml(clip.name)}</span>
                             </div>
                             <div class="clip-right-group" onclick="event.stopPropagation()">
-                                ${clip.type === 'image' || isClock(clip) ? '' : `<div class="clip-controls">
+                                ${(clip.type === 'image' && !(isWebcam(clip) && clip.webcam.audioId)) || isClock(clip) ? '' : `<div class="clip-controls">
                                     <div class="control-group">
                                         ${volumeSvg}
                                         <input type="range" id="vol-input-${idx}" class="inline-volume ${volumeStateClass(clip.gain)}" min="0" max="200" step="1" value="${gainToFaderPos(clip.gain)}" style="--vol-pct: ${gainToFaderPos(clip.gain) / 2}%" ${isLive ? 'disabled' : ''} oninput="setClipGain(${idx}, this.value)" onchange="this.blur()" onmouseup="this.blur()" ondblclick="resetClipGain(${idx})" title="VOLUME: ${Math.round(clip.gain * 100)}% (DOUBLE-CLICK: 100%)">
@@ -2589,6 +2733,12 @@
                 canvas.style.display = 'block';
                 canvas.style.opacity = '1';
                 previewClock.start(clip.clock, { paused: true });
+            } else if (isWebcam(clip)) {
+                // The camera's live picture (an error shows on the CUE monitor, the cue turns red on TAKE)
+                if (!clip.mediaError) startCamView('preview', clip, msg => {
+                    if (placeholder) { placeholder.innerText = msg; placeholder.style.display = 'block'; }
+                });
+                else if (placeholder) { placeholder.innerText = clip.mediaError; placeholder.style.display = 'block'; }
             } else if (clip.type === 'image') {
                 prevImg.style.display = 'block';
                 prevImg.style.opacity = '1';
@@ -2676,6 +2826,7 @@
                 canvas.style.display = 'none';
                 previewClock.stop();
                 document.getElementById('preview-clock').style.display = 'none';
+                stopCamView('preview');
                 return;
             }
             canvas.width = bitmap.width;
@@ -3250,6 +3401,12 @@
                 programClock.start(clip.clock);
                 currentProgramDuration = programClock.duration;
                 handleTimeUpdate(0, currentProgramDuration);
+            } else if (isWebcam(clip)) {
+                currentProgramDuration = 0;
+                document.getElementById('prog-elapsed').innerText = '--:--:--';
+                document.getElementById('prog-remaining').innerText = '--:--:--';
+                // With the output closed the PGM monitor is the program: a camera failure turns the cue red
+                startCamView('program', clip, msg => { if (!isOutputWindowOpen) handleProgramMediaError(clip.url, msg); });
             } else if (clip.type === 'image') {
                 progImg.style.display = 'block';
                 progImg.style.opacity = '1';
