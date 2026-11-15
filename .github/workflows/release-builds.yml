@@ -22,7 +22,8 @@ env:
 
 jobs:
   mac:
-    runs-on: macos-14
+    # macos-14 was retired by GitHub (jobs were cancelled with "configuration not supported", 2026-11-15)
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
         with:
