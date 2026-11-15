@@ -163,11 +163,65 @@ function isFilling(win) {
     return !!win && !win.isDestroyed() && win.pjFilling === true;
 }
 
+// On Linux the output uses the system's own fullscreen to fill a screen. Linux window managers place and size
+// windows themselves (ChromeOS's Linux apps and Wayland ignore a window's position; GNOME keeps windows clear of
+// its top bar), so a window sized to the screen lands off-centre or short of the edges; real fullscreen covers the
+// whole screen, bars included. Windows and macOS keep the sized borderless window above.
+const NATIVE_FULLSCREEN = process.platform === 'linux';
+
+// Linux: leaves fullscreen first if needed (bounds set during the exit would be undone), then runs `then`
+function afterLeavingFullscreen(win, then) {
+    if (!win.isFullScreen()) { then(); return; }
+    let done = false;
+    const go = () => { if (done || win.isDestroyed()) return; done = true; then(); };
+    win.pjLeavingFullscreen = true;
+    win.once('leave-full-screen', () => setTimeout(go, 50));
+    setTimeout(go, 600); // some window managers never report it
+    win.setFullScreen(false);
+    setTimeout(() => { if (!win.isDestroyed()) win.pjLeavingFullscreen = false; }, 700);
+}
+
+function placeOutputWindowNative(win, fill, displayOrBounds) {
+    if (fill) {
+        const display = displayOrBounds;
+        const onIt = screen.getDisplayMatching(win.getBounds()).id === display.id;
+        if (win.isFullScreen() && onIt) return;
+        // Onto the right screen (where the window manager allows it), then fullscreen there
+        afterLeavingFullscreen(win, () => {
+            win.setAspectRatio(0);
+            win.setBounds(windowedCorner(display));
+            setTimeout(() => { if (!win.isDestroyed() && win.pjFilling) win.setFullScreen(true); }, 50);
+        });
+    } else {
+        afterLeavingFullscreen(win, () => {
+            win.setBounds(displayOrBounds);
+            applyOutputAspect(win);
+            if (screen.getDisplayMatching(win.getBounds()).id === screen.getPrimaryDisplay().id) consoleToFront();
+        });
+    }
+}
+
+// Linux: the window manager (or a keyboard shortcut) took the output out of fullscreen by itself: it's a window
+// now, and the console's FULLSCREEN button says so
+function watchNativeFullscreen(win) {
+    if (!NATIVE_FULLSCREEN) return;
+    win.on('leave-full-screen', () => {
+        if (win.isDestroyed() || !win.pjFilling || win.pjLeavingFullscreen) return;
+        win.pjFilling = false;
+        outputWantsWindow = true;
+        applyOutputAspect(win);
+        win.webContents.send('output-windowed', true);
+        sendOutputStatus(win);
+    });
+}
+
 // Puts the output in its place: filling a display (fill true), or a window at these bounds (fill false)
 function placeOutputWindow(win, fill, displayOrBounds) {
     if (!win || win.isDestroyed()) return;
     win.pjFilling = fill;
-    if (fill) {
+    if (NATIVE_FULLSCREEN) {
+        placeOutputWindowNative(win, fill, displayOrBounds);
+    } else if (fill) {
         const display = displayOrBounds;
         win.setAspectRatio(0);
         win.setResizable(false);
@@ -565,7 +619,7 @@ function createOutputWindow({ reveal = false, hidden = false } = {}) {
         resizable: true,
         movable: true,
         maximizable: false,
-        fullscreenable: false,
+        fullscreenable: NATIVE_FULLSCREEN, // Linux fills a screen with the system's fullscreen (see NATIVE_FULLSCREEN)
         enableLargerThanScreen: true, // macOS: lets it cover the menu bar's strip when filling a screen
         show: !reveal && !hidden, // at launch it appears with the console (launch reveal)
         ...layout.bounds,
@@ -586,6 +640,7 @@ function createOutputWindow({ reveal = false, hidden = false } = {}) {
     outputWindow.loadFile(path.join(__dirname, 'output.html'));
 
     const win = outputWindow;
+    watchNativeFullscreen(win);
     placeOutputWindow(win, layout.fullscreen, layout.fullscreen ? layout.display : layout.bounds);
     if (hidden) {
         win.pjHidden = true;
